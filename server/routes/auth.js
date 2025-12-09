@@ -11,6 +11,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { registerFingerprint, validateTemplate } from '../utils/biometric.js';
 import { hashAadhaar } from '../utils/blockchain.js';
+import * as supabaseClient from '../utils/supabaseClient.js';
 
 const router = express.Router();
 const __filename = fileURLToPath(import.meta.url);
@@ -77,65 +78,100 @@ router.post('/register', async (req, res) => {
             });
         }
 
-        // Read existing users
-        const users = readUsers();
-
-        // Check if Aadhaar already registered
+        // Prepare hashed aadhaar and check existing user in Supabase first
         const aadharHash = hashAadhaar(aadhar);
-        const existingUser = users.find(u => u.aadharHash === aadharHash);
 
-        if (existingUser) {
-            return res.status(409).json({
-                error: 'Aadhaar number already registered',
+        try {
+            const existing = await supabaseClient.getUserByAadharHash(aadharHash);
+            if (existing) {
+                return res.status(409).json({ error: 'Aadhaar number already registered' });
+            }
+
+            // Register fingerprint (get templateId)
+            const biometricResult = await registerFingerprint(fingerprintTemplate, aadharHash);
+
+            // Create new user object
+            const newUser = {
+                id: `USER_${Date.now()}`,
+                aadhar_hash: aadharHash,
+                raw_aadhaar: aadhar, // kept for testing fallback
+                name_first: firstName,
+                name_middle: middleName || '',
+                name_last: lastName,
+                age: parseInt(age),
+                phone: phone || '',
+                photo: photo || '',
+                biometric: {
+                    template_id: biometricResult.templateId,
+                    template: fingerprintTemplate,
+                },
+                has_voted: false,
+                registered_at: new Date().toISOString(),
+            };
+
+            // Try to create in Supabase
+            const created = await supabaseClient.createUser(newUser);
+
+            // Generate JWT token
+            const token = generateToken({
+                userId: created.id,
+                aadharHash: aadharHash,
+                role: 'voter',
             });
+
+            console.log(`✅ New voter registered (supabase): ${created.id}`);
+
+            return res.status(201).json({
+                success: true,
+                message: 'Registration successful',
+                token,
+                user: {
+                    id: created.id,
+                    name: `${firstName} ${lastName}`,
+                    hasVoted: created.has_voted,
+                },
+            });
+        } catch (err) {
+            console.error('❌ Supabase registration failed, falling back to local JSON:', err.message);
+
+            // Fallback to file-based storage
+            const users = readUsers();
+            const existingUser = users.find(u => u.aadharHash === aadharHash || u.rawAadhaar === aadhar);
+            if (existingUser) {
+                return res.status(409).json({ error: 'Aadhaar number already registered' });
+            }
+
+            const biometricResult = await registerFingerprint(fingerprintTemplate, aadharHash);
+
+            const newUser = {
+                id: `USER_${Date.now()}`,
+                aadharHash,
+                rawAadhaar: aadhar,
+                name: {
+                    first: firstName,
+                    middle: middleName || '',
+                    last: lastName,
+                },
+                age: parseInt(age),
+                phone: phone || '',
+                photo: photo || '',
+                biometric: {
+                    templateId: biometricResult.templateId,
+                    template: fingerprintTemplate,
+                },
+                hasVoted: false,
+                registeredAt: new Date().toISOString(),
+            };
+
+            users.push(newUser);
+            writeUsers(users);
+
+            const token = generateToken({ userId: newUser.id, aadharHash: newUser.aadharHash, role: 'voter' });
+
+            console.log(`✅ New voter registered (local fallback): ${newUser.id}`);
+
+            return res.status(201).json({ success: true, message: 'Registration successful', token, user: { id: newUser.id, name: `${newUser.name.first} ${newUser.name.last}`, hasVoted: newUser.hasVoted } });
         }
-
-        // Register fingerprint (get templateId)
-        const biometricResult = await registerFingerprint(fingerprintTemplate, aadharHash);
-
-        // Create new user object
-        const newUser = {
-            id: `USER_${Date.now()}`,
-            aadharHash, // Store ONLY the hash, never plaintext
-            name: {
-                first: firstName,
-                middle: middleName || '',
-                last: lastName,
-            },
-            age: parseInt(age),
-            phone: phone || '',
-            photo: photo || '', // Base64 encoded photo
-            biometric: {
-                templateId: biometricResult.templateId,
-                template: fingerprintTemplate, // Store template for verification
-            },
-            hasVoted: false,
-            registeredAt: new Date().toISOString(),
-        };
-
-        // Add to users array
-        users.push(newUser);
-        writeUsers(users);
-
-        // Generate JWT token
-        const token = generateToken({
-            userId: newUser.id,
-            aadharHash: newUser.aadharHash,
-            role: 'voter',
-        });
-
-        console.log(`✅ New voter registered: ${newUser.id}`);
-
-        res.status(201).json({
-            success: true,
-            message: 'Registration successful',
-            token,
-            user: {
-                id: newUser.id,
-                name: `${newUser.name.first} ${newUser.name.last}`,
-                hasVoted: newUser.hasVoted,
-            },
-        });
     } catch (error) {
         console.error('❌ Registration error:', error);
         res.status(500).json({
@@ -144,6 +180,11 @@ router.post('/register', async (req, res) => {
         });
     }
 });
+
+/**
+ * POST /api/auth/login
+ * Login for voters and officers
+ */
 
 /**
  * POST /api/auth/login
@@ -200,9 +241,46 @@ router.post('/login', async (req, res) => {
                 });
             }
 
+            // 1. Try Supabase first (Primary Source of Truth)
+            let user = null;
+            try {
+                const aadharHash = hashAadhaar(aadhar);
+                user = await supabaseClient.getUserByAadharHash(aadharHash);
+
+                // Fallback (DEV ONLY): Check raw aadhaar if hash lookup fails
+                if (!user && process.env.NODE_ENV === 'development') {
+                    user = await supabaseClient.getUserByRawAadhaar(aadhar);
+                }
+
+                if (user) {
+                    // Normalize Supabase user object to frontend expectation
+                    const token = generateToken({
+                        userId: user.id,
+                        aadharHash: user.aadhar_hash,
+                        role: 'voter',
+                    });
+
+                    console.log(`✅ Voter logged in (Supabase): ${user.id}`);
+
+                    return res.json({
+                        success: true,
+                        message: 'Login successful',
+                        token,
+                        user: {
+                            id: user.id,
+                            name: `${user.name_first} ${user.name_last}`,
+                            hasVoted: user.has_voted,
+                        },
+                    });
+                }
+            } catch (err) {
+                console.error('⚠️ Supabase login check failed, falling back to local:', err.message);
+            }
+
+            // 2. Fallback to Local JSON (Secondary/Legacy)
             const users = readUsers();
             const aadharHash = hashAadhaar(aadhar);
-            const user = users.find(u => u.aadharHash === aadharHash);
+            user = users.find(u => u.aadharHash === aadharHash);
 
             if (!user) {
                 return res.status(404).json({
@@ -216,7 +294,7 @@ router.post('/login', async (req, res) => {
                 role: 'voter',
             });
 
-            console.log(`✅ Voter logged in: ${user.id}`);
+            console.log(`✅ Voter logged in (Local): ${user.id}`);
 
             return res.json({
                 success: true,

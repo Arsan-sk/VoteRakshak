@@ -134,6 +134,19 @@ app.get('/api/health', (req, res) => {
     });
 });
 
+// Root info endpoint (friendly message for browser / external checks)
+app.get('/', (req, res) => {
+    res.json({
+        message: 'VoteRakshak Backend - API available under /api',
+        health: '/api/health',
+        routes: [
+            '/api/auth',
+            '/api/voting',
+            '/api/officer',
+        ],
+    });
+});
+
 // Get active booths (for officer dashboard)
 app.get('/api/booths/active', (req, res) => {
     const booths = Array.from(activeBooths.entries()).map(([id, info]) => ({

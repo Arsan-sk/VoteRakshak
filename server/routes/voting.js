@@ -62,6 +62,8 @@ function readBooths() {
     return JSON.parse(fs.readFileSync(BOOTHS_DB_PATH, 'utf8'));
 }
 
+
+
 // =================== Routes ===================
 
 /**
@@ -87,17 +89,33 @@ router.post('/cast', async (req, res) => {
         }
 
         // Find user
-        const users = readUsers();
         const aadharHash = hashAadhaar(aadhar);
-        const userIndex = users.findIndex(u => u.aadharHash === aadharHash);
 
-        if (userIndex === -1) {
-            return res.status(404).json({
-                error: 'Voter not found',
-            });
+        // Try Supabase first, then fall back to local JSON
+        let user = null;
+        try {
+            user = await (await import('../utils/supabaseClient.js')).getUserByAadharHash(aadharHash);
+            if (!user) {
+                user = await (await import('../utils/supabaseClient.js')).getUserByRawAadhaar(aadhar);
+            }
+        } catch (err) {
+            console.error('❌ Supabase lookup failed, falling back to local JSON:', err.message);
         }
 
-        const user = users[userIndex];
+        if (!user) {
+            const users = readUsers();
+            // Try to find by hashed Aadhaar first, then fall back to raw Aadhaar (test/dev only)
+            let userIndex = users.findIndex(u => u.aadharHash === aadharHash);
+            if (userIndex === -1) {
+                userIndex = users.findIndex(u => u.rawAadhaar === aadhar);
+            }
+
+            if (userIndex === -1) {
+                return res.status(404).json({ error: 'Voter not found' });
+            }
+
+            user = users[userIndex];
+        }
 
         // Check if already voted (blockchain check)
         const alreadyVoted = await hasVoted(aadharHash);
@@ -128,9 +146,17 @@ router.post('/cast', async (req, res) => {
         const txResult = await blockchainCastVote(aadharHash, partyId);
 
         // Update user's voted status
-        users[userIndex].hasVoted = true;
-        users[userIndex].votedAt = new Date().toISOString();
-        writeUsers(users);
+        try {
+            await (await import('../utils/supabaseClient.js')).markUserVoted(aadharHash);
+            console.log('✅ Marked user as voted in Supabase');
+        } catch (err) {
+            console.error('❌ Failed to update Supabase status, falling back to local file:', err.message);
+            if (userIndex !== -1) {
+                users[userIndex].hasVoted = true;
+                users[userIndex].votedAt = new Date().toISOString();
+                writeUsers(users);
+            }
+        }
 
         console.log(`🗳️  Vote cast successfully: ${user.id} -> Party ${partyId}`);
 
@@ -176,6 +202,33 @@ router.get('/voter/:aadhar', async (req, res) => {
         // Check blockchain for voting status
         const votedOnChain = await hasVoted(aadharHash);
 
+        // Try to get user from Supabase first
+        try {
+            const sbUser = await (await import('../utils/supabaseClient.js')).getUserByAadharHash(aadharHash);
+            if (sbUser) {
+                return res.json({
+                    success: true,
+                    voter: {
+                        id: sbUser.id,
+                        name: {
+                            first: sbUser.name_first,
+                            middle: sbUser.name_middle,
+                            last: sbUser.name_last,
+                        },
+                        fullName: `${sbUser.name_first} ${sbUser.name_middle || ''} ${sbUser.name_last}`.trim(),
+                        age: sbUser.age,
+                        phone: sbUser.phone,
+                        photo: sbUser.photo,
+                        hasVoted: votedOnChain || sbUser.has_voted,
+                        registeredAt: sbUser.registered_at,
+                        votedAt: sbUser.voted_at || null,
+                    },
+                });
+            }
+        } catch (err) {
+            console.warn('Supabase fetch failed (voter lookup), using local fallback');
+        }
+
         res.json({
             success: true,
             voter: {
@@ -207,9 +260,19 @@ router.get('/voter/:aadhar', async (req, res) => {
  * GET /api/voting/booths
  * Get list of polling booths
  */
-router.get('/booths', (req, res) => {
+router.get('/booths', async (req, res) => {
     try {
-        const booths = readBooths();
+        let booths = [];
+        try {
+            booths = await (await import('../utils/supabaseClient.js')).getBooths();
+            if (!booths || booths.length === 0) throw new Error("No booths in DB");
+        } catch (err) {
+            console.warn('Supabase booth fetch failed, using local fallback:', err.message);
+            // Fallback to local
+            // We can just reuse readBooths helper but it might need to be exported or available in scope. 
+            // readBooths is in scope.
+            booths = readBooths();
+        }
 
         res.json({
             success: true,

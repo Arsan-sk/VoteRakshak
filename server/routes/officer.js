@@ -30,13 +30,33 @@ function writeLogs(logs) {
 }
 
 function addLog(logEntry) {
-    const logs = readLogs();
-    logs.push({
-        ...logEntry,
-        timestamp: new Date().toISOString(),
-        id: `LOG_${Date.now()}`,
-    });
-    writeLogs(logs);
+    // Try adding log to Supabase, fallback to local file
+    (async () => {
+        try {
+            const logObj = {
+                id: `LOG_${Date.now()}`,
+                action: logEntry.action,
+                booth_id: logEntry.boothId || null,
+                voter_aadhar: logEntry.voterAadhar || null,
+                officer_id: logEntry.officerId || null,
+                status: logEntry.status || null,
+                details: { error: logEntry.error || null },
+                timestamp: new Date().toISOString(),
+            };
+            await (await import('../utils/supabaseClient.js')).addLog(logObj);
+            return;
+        } catch (err) {
+            console.error('❌ Supabase addLog failed, falling back to local file:', err.message);
+        }
+
+        const logs = readLogs();
+        logs.push({
+            ...logEntry,
+            timestamp: new Date().toISOString(),
+            id: `LOG_${Date.now()}`,
+        });
+        writeLogs(logs);
+    })();
 }
 
 // =================== Routes ===================
@@ -184,42 +204,47 @@ router.post('/reset-booth', (req, res) => {
  * GET /api/officer/audit-logs
  * Get audit logs for all booth operations
  */
-router.get('/audit-logs', (req, res) => {
+router.get('/audit-logs', async (req, res) => {
     try {
-        const logs = readLogs();
+        let logs = [];
+        try {
+            logs = await (await import('../utils/supabaseClient.js')).getLogs(req.query);
+        } catch (err) {
+            console.warn('Supabase logs fetch failed, using local fallback:', err.message);
+            logs = readLogs();
+            // Apply filters locally if fallback
+            const { startDate, endDate, boothId, action } = req.query;
+            let filteredLogs = logs;
 
-        // Optional filtering by date range
-        const { startDate, endDate, boothId, action } = req.query;
+            if (startDate) {
+                filteredLogs = filteredLogs.filter(
+                    log => new Date(log.timestamp) >= new Date(startDate)
+                );
+            }
 
-        let filteredLogs = logs;
+            if (endDate) {
+                filteredLogs = filteredLogs.filter(
+                    log => new Date(log.timestamp) <= new Date(endDate)
+                );
+            }
 
-        if (startDate) {
-            filteredLogs = filteredLogs.filter(
-                log => new Date(log.timestamp) >= new Date(startDate)
-            );
-        }
+            if (boothId) {
+                filteredLogs = filteredLogs.filter(log => log.boothId === boothId);
+            }
 
-        if (endDate) {
-            filteredLogs = filteredLogs.filter(
-                log => new Date(log.timestamp) <= new Date(endDate)
-            );
-        }
-
-        if (boothId) {
-            filteredLogs = filteredLogs.filter(log => log.boothId === boothId);
-        }
-
-        if (action) {
-            filteredLogs = filteredLogs.filter(log => log.action === action);
+            if (action) {
+                filteredLogs = filteredLogs.filter(log => log.action === action);
+            }
+            logs = filteredLogs;
         }
 
         // Sort by timestamp descending (newest first)
-        filteredLogs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
         res.json({
             success: true,
-            count: filteredLogs.length,
-            logs: filteredLogs,
+            count: logs.length,
+            logs: logs,
         });
     } catch (error) {
         console.error('❌ Error fetching audit logs:', error);
@@ -234,9 +259,15 @@ router.get('/audit-logs', (req, res) => {
  * GET /api/officer/stats
  * Get statistics for officer dashboard
  */
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
     try {
-        const logs = readLogs();
+        let logs = [];
+        try {
+            logs = await (await import('../utils/supabaseClient.js')).getLogs();
+        } catch (err) {
+            logs = readLogs();
+        }
+
         const activeBooths = req.app.get('activeBooths');
 
         const stats = {

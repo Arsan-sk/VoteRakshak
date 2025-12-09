@@ -1,1 +1,21 @@
-[]
+[
+	{
+		"id": "USER_TEST_001",
+		"aadharHash": "TEST_AADHAAR_HASH_PLACEHOLDER",
+		"rawAadhaar": "111122223333",
+		"name": {
+			"first": "Test",
+			"middle": "",
+			"last": "Voter"
+		},
+		"age": 30,
+		"phone": "9999999999",
+		"photo": "",
+		"biometric": {
+			"templateId": "TPL_TEST_001",
+			"template": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+		},
+		"hasVoted": false,
+		"registeredAt": "2025-12-10T00:00:00.000Z"
+	}
+]
