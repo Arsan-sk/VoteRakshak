@@ -23,15 +23,29 @@ const USERS_DB_PATH = path.join(__dirname, '..', 'data', 'users.json');
 // =================== Helper Functions ===================
 
 function readUsers() {
-    if (!fs.existsSync(USERS_DB_PATH)) {
-        fs.mkdirSync(path.dirname(USERS_DB_PATH), { recursive: true });
-        fs.writeFileSync(USERS_DB_PATH, JSON.stringify([], null, 2));
+    try {
+        if (!fs.existsSync(USERS_DB_PATH)) {
+            try {
+                fs.mkdirSync(path.dirname(USERS_DB_PATH), { recursive: true });
+                fs.writeFileSync(USERS_DB_PATH, JSON.stringify([], null, 2));
+            } catch (err) {
+                console.warn('⚠️ Cannot create local users file (likely read-only FS). Returning empty list.');
+                return [];
+            }
+        }
+        return JSON.parse(fs.readFileSync(USERS_DB_PATH, 'utf8'));
+    } catch (err) {
+        console.error('❌ Failed to read local users:', err.message);
+        return [];
     }
-    return JSON.parse(fs.readFileSync(USERS_DB_PATH, 'utf8'));
 }
 
 function writeUsers(users) {
-    fs.writeFileSync(USERS_DB_PATH, JSON.stringify(users, null, 2));
+    try {
+        fs.writeFileSync(USERS_DB_PATH, JSON.stringify(users, null, 2));
+    } catch (err) {
+        console.error('❌ Failed to write local users (likely read-only FS):', err.message);
+    }
 }
 
 function generateToken(payload) {

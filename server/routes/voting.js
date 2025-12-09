@@ -21,45 +21,72 @@ const BOOTHS_DB_PATH = path.join(__dirname, '..', 'data', 'booths.json');
 // =================== Helper Functions ===================
 
 function readUsers() {
-    if (!fs.existsSync(USERS_DB_PATH)) {
+    try {
+        if (!fs.existsSync(USERS_DB_PATH)) {
+            return [];
+        }
+        return JSON.parse(fs.readFileSync(USERS_DB_PATH, 'utf8'));
+    } catch (err) {
+        console.error('❌ Failed to read local users:', err.message);
         return [];
     }
-    return JSON.parse(fs.readFileSync(USERS_DB_PATH, 'utf8'));
 }
 
 function writeUsers(users) {
-    fs.writeFileSync(USERS_DB_PATH, JSON.stringify(users, null, 2));
+    try {
+        fs.writeFileSync(USERS_DB_PATH, JSON.stringify(users, null, 2));
+    } catch (err) {
+        console.error('❌ Failed to write local users (likely read-only FS):', err.message);
+    }
 }
 
 function readBooths() {
-    if (!fs.existsSync(BOOTHS_DB_PATH)) {
-        // Create default booths data
-        const defaultBooths = [
+    try {
+        if (!fs.existsSync(BOOTHS_DB_PATH)) {
+            // Create default booths data
+            const defaultBooths = [
+                {
+                    id: 'BOOTH_001',
+                    name: 'Central Polling Station',
+                    address: '123 Main Street, Mumbai, Maharashtra',
+                    coordinates: { lat: 19.0760, lng: 72.8777 },
+                },
+                {
+                    id: 'BOOTH_002',
+                    name: 'North District Center',
+                    address: '456 Park Avenue, Mumbai, Maharashtra',
+                    coordinates: { lat: 19.1136, lng: 72.8697 },
+                },
+                {
+                    id: 'BOOTH_003',
+                    name: 'South Community Hall',
+                    address: '789 Beach Road, Mumbai, Maharashtra',
+                    coordinates: { lat: 18.9220, lng: 72.8347 },
+                },
+            ];
+
+            try {
+                fs.mkdirSync(path.dirname(BOOTHS_DB_PATH), { recursive: true });
+                fs.writeFileSync(BOOTHS_DB_PATH, JSON.stringify(defaultBooths, null, 2));
+            } catch (err) {
+                console.warn('⚠️ Cannot create local booths file. Using default booths in memory.');
+                return defaultBooths;
+            }
+            return defaultBooths;
+        }
+        return JSON.parse(fs.readFileSync(BOOTHS_DB_PATH, 'utf8'));
+    } catch (err) {
+        console.error('❌ Failed to read local booths:', err.message);
+        // Return defaults on error so the app doesn't crash
+        return [
             {
                 id: 'BOOTH_001',
                 name: 'Central Polling Station',
                 address: '123 Main Street, Mumbai, Maharashtra',
                 coordinates: { lat: 19.0760, lng: 72.8777 },
-            },
-            {
-                id: 'BOOTH_002',
-                name: 'North District Center',
-                address: '456 Park Avenue, Mumbai, Maharashtra',
-                coordinates: { lat: 19.1136, lng: 72.8697 },
-            },
-            {
-                id: 'BOOTH_003',
-                name: 'South Community Hall',
-                address: '789 Beach Road, Mumbai, Maharashtra',
-                coordinates: { lat: 18.9220, lng: 72.8347 },
-            },
+            }
         ];
-
-        fs.mkdirSync(path.dirname(BOOTHS_DB_PATH), { recursive: true });
-        fs.writeFileSync(BOOTHS_DB_PATH, JSON.stringify(defaultBooths, null, 2));
-        return defaultBooths;
     }
-    return JSON.parse(fs.readFileSync(BOOTHS_DB_PATH, 'utf8'));
 }
 
 
@@ -193,8 +220,14 @@ router.get('/voter/:aadhar', async (req, res) => {
         const aadharHash = hashAadhaar(aadhar);
         let user = users.find(u => u.aadharHash === aadharHash);
 
-        // Check blockchain for voting status
-        const votedOnChain = await hasVoted(aadharHash);
+        // Check blockchain for voting status (Fail-safe)
+        let votedOnChain = false;
+        try {
+            votedOnChain = await hasVoted(aadharHash);
+        } catch (chainErr) {
+            console.warn('⚠️ Blockchain check failed (likely not connected). Treating as not voted on chain.', chainErr.message);
+            // Non-blocking: proceed with database data only
+        }
 
         // Try to get user from Supabase first
         try {
