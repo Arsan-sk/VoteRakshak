@@ -16,13 +16,13 @@ const features = [
 ];
 
 const Features = () => (
-  <section className="flex flex-col gap-10 px-4 py-10">
-    <h1 className="text-white text-[32px] font-bold">Key Features</h1>
-    <div className="grid grid-cols-[repeat(auto-fit,minmax(158px,1fr))] gap-3">
+  <section className="flex flex-col gap-10 px-6 py-20 max-w-7xl mx-auto">
+    <h2 className="text-3xl md:text-4xl font-extrabold text-center text-white">Key Features</h2>
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
       {features.map((f) => (
-        <div key={f.title} className="flex flex-col gap-3 rounded-lg border border-[#3d5245] bg-[#1c2620] p-4">
-          <h2 className="text-white text-base font-bold">{f.title}</h2>
-          <p className="text-[#9eb7a8] text-sm">{f.desc}</p>
+        <div key={f.title} className="flex flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-900/50 p-6 hover:border-indigo-500/50 transition-colors">
+          <h3 className="text-xl font-bold text-white">{f.title}</h3>
+          <p className="text-slate-400 leading-relaxed">{f.desc}</p>
         </div>
       ))}
     </div>

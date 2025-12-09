@@ -198,7 +198,7 @@ app.use((req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, async () => {
     console.log('═══════════════════════════════════════════════════');
     console.log('🚀 VoteRakshak Backend Server');
     console.log('═══════════════════════════════════════════════════');
@@ -217,6 +217,20 @@ httpServer.listen(PORT, () => {
     console.log('   GET    /api/booths/active');
     console.log('   GET    /api/health');
     console.log('═══════════════════════════════════════════════════\n');
+
+    // Initialize Blockchain Listener
+    try {
+        const { initializeBlockchain, listenForVotes } = await import('./utils/blockchain.js');
+        await initializeBlockchain();
+        console.log('🔗 Blockchain initialized. Listening for votes...');
+
+        listenForVotes((voteData) => {
+            console.log('📡 Broadcasting new vote block:', voteData);
+            io.emit('new_block', voteData);
+        });
+    } catch (err) {
+        console.warn('⚠️ Blockchain initialization failed (Visualizer might not work):', err.message);
+    }
 });
 
 // Graceful shutdown

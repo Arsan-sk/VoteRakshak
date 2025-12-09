@@ -14,7 +14,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5173,
+    port: 5176,
     proxy: {
       // Proxy /sg/* to the SecuGen server at https://localhost:8000
       // This makes requests appear same-origin to the browser and avoids CORS.
