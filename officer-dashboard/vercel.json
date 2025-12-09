@@ -1,4 +1,10 @@
 {
+    "rewrites": [
+        {
+            "source": "/(.*)",
+            "destination": "/index.html"
+        }
+    ],
     "env": {
         "VITE_BACKEND_URL": "https://server-voterakshak-production.up.railway.app"
     }

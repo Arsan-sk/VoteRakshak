@@ -18,15 +18,29 @@ const LOGS_DB_PATH = path.join(__dirname, '..', 'data', 'logs.json');
 // =================== Helper Functions ===================
 
 function readLogs() {
-    if (!fs.existsSync(LOGS_DB_PATH)) {
-        fs.mkdirSync(path.dirname(LOGS_DB_PATH), { recursive: true });
-        fs.writeFileSync(LOGS_DB_PATH, JSON.stringify([], null, 2));
+    try {
+        if (!fs.existsSync(LOGS_DB_PATH)) {
+            try {
+                fs.mkdirSync(path.dirname(LOGS_DB_PATH), { recursive: true });
+                fs.writeFileSync(LOGS_DB_PATH, JSON.stringify([], null, 2));
+            } catch (err) {
+                console.warn('⚠️ Cannot create local log file (likely read-only FS). Returning empty logs.');
+                return [];
+            }
+        }
+        return JSON.parse(fs.readFileSync(LOGS_DB_PATH, 'utf8'));
+    } catch (err) {
+        console.error('❌ Failed to read local logs:', err.message);
+        return [];
     }
-    return JSON.parse(fs.readFileSync(LOGS_DB_PATH, 'utf8'));
 }
 
 function writeLogs(logs) {
-    fs.writeFileSync(LOGS_DB_PATH, JSON.stringify(logs, null, 2));
+    try {
+        fs.writeFileSync(LOGS_DB_PATH, JSON.stringify(logs, null, 2));
+    } catch (err) {
+        console.error('❌ Failed to write local logs (likely read-only FS):', err.message);
+    }
 }
 
 function addLog(logEntry) {
