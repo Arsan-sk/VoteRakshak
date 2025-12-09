@@ -1,0 +1,17 @@
+{
+    "buildCommand": "npm run build",
+    "outputDirectory": "dist",
+    "devCommand": "npm run dev",
+    "installCommand": "npm install",
+    "framework": "vite",
+    "env": {
+        "VITE_BACKEND_URL": {
+            "description": "Backend API URL (Railway deployment)",
+            "value": "https://voterakshak-production.up.railway.app"
+        },
+        "VITE_BOOTH_ID": {
+            "description": "Unique booth identifier (e.g., BOOTH_001, BOOTH_002)",
+            "value": "BOOTH_001"
+        }
+    }
+}

@@ -1,0 +1,13 @@
+{
+    "buildCommand": "npm run build",
+    "outputDirectory": "dist",
+    "devCommand": "npm run dev",
+    "installCommand": "npm install",
+    "framework": "vite",
+    "env": {
+        "VITE_BACKEND_URL": {
+            "description": "Backend API URL (Railway deployment)",
+            "value": "https://your-backend.up.railway.app"
+        }
+    }
+}

@@ -33,6 +33,9 @@ const corsOptions = {
         process.env.VOTER_PORTAL_URL || 'http://localhost:5173',
         process.env.OFFICER_DASHBOARD_URL || 'http://localhost:5174',
         process.env.POLLING_BOOTH_URL || 'http://localhost:5175',
+        'https://vote-rakshak-4yld.vercel.app',
+        'https://vote-rakshak-git-main-mohd-arsans-projects.vercel.app',
+        'https://vote-rakshak.vercel.app'
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
