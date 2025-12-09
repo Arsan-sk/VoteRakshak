@@ -5,8 +5,21 @@
 
 import { io } from 'socket.io-client';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+// Robust URL handling
+let backendUrl = import.meta.env.VITE_BACKEND_URL;
+if (!backendUrl || backendUrl.trim() === '') {
+    backendUrl = 'http://localhost:5000';
+}
+// Ensure protocol
+if (!backendUrl.startsWith('http')) {
+    backendUrl = `http://${backendUrl}`;
+}
+// Remove trailing slash
+backendUrl = backendUrl.replace(/\/$/, '');
+
 const BOOTH_ID = import.meta.env.VITE_BOOTH_ID || 'BOOTH_001';
+
+console.log(`🔌 Initializing socket for ${BOOTH_ID} to ${backendUrl}`);
 
 let socket = null;
 
@@ -21,13 +34,13 @@ export function initializeSocket(onAllowVote, onReset) {
         return socket;
     }
 
-    console.log(`🔌 Connecting to ${BACKEND_URL}...`);
+    console.log(`🔌 Connecting to ${backendUrl}...`);
 
-    socket = io(BACKEND_URL, {
+    socket = io(backendUrl, {
         transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionDelay: 1000,
-        reconnectionAttempts: 5,
+        reconnectionAttempts: Infinity, // Keep trying
     });
 
     // Connection established

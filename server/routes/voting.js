@@ -191,20 +191,21 @@ router.get('/voter/:aadhar', async (req, res) => {
 
         const users = readUsers();
         const aadharHash = hashAadhaar(aadhar);
-        const user = users.find(u => u.aadharHash === aadharHash);
-
-        if (!user) {
-            return res.status(404).json({
-                error: 'Voter not found',
-            });
-        }
+        let user = users.find(u => u.aadharHash === aadharHash);
 
         // Check blockchain for voting status
         const votedOnChain = await hasVoted(aadharHash);
 
         // Try to get user from Supabase first
         try {
-            const sbUser = await (await import('../utils/supabaseClient.js')).getUserByAadharHash(aadharHash);
+            let sbUser = await (await import('../utils/supabaseClient.js')).getUserByAadharHash(aadharHash);
+
+            // If not found by hash, try raw Aadhaar (handling Salt mismatches)
+            if (!sbUser) {
+                console.log('⚠️ Voter not found by hash, trying raw Aadhaar...');
+                sbUser = await (await import('../utils/supabaseClient.js')).getUserByRawAadhaar(aadhar);
+            }
+
             if (sbUser) {
                 return res.json({
                     success: true,
@@ -226,7 +227,13 @@ router.get('/voter/:aadhar', async (req, res) => {
                 });
             }
         } catch (err) {
-            console.warn('Supabase fetch failed (voter lookup), using local fallback');
+            console.warn('Supabase fetch failed (voter lookup), using local fallback:', err.message);
+        }
+
+        if (!user) {
+            return res.status(404).json({
+                error: 'Voter not found',
+            });
         }
 
         res.json({

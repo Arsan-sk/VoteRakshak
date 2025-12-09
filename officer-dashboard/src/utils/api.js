@@ -4,10 +4,22 @@
 
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+// Robust URL handling
+let baseUrl = import.meta.env.VITE_BACKEND_URL;
+if (!baseUrl || baseUrl.trim() === '') {
+    baseUrl = 'http://localhost:5000';
+}
+// Ensure protocol
+if (!baseUrl.startsWith('http')) {
+    baseUrl = `http://${baseUrl}`;
+}
+// Remove trailing slash
+baseUrl = baseUrl.replace(/\/$/, '');
+
+console.log('🔗 API Base URL:', baseUrl);
 
 const api = axios.create({
-    baseURL: `${API_BASE_URL}/api`,
+    baseURL: `${baseUrl}/api`,
     headers: {
         'Content-Type': 'application/json',
     },
@@ -95,9 +107,7 @@ export async function getBooths() {
  * Get active booths
  */
 export async function getActiveBooths() {
-    const response = await api.get('/booths/active', {
-        baseURL: API_BASE_URL,
-    });
+    const response = await api.get('/booths/active');
     return response.data;
 }
 

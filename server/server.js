@@ -38,14 +38,27 @@ const httpServer = createServer(app);
 
 // CORS configuration for three frontend origins
 const corsOptions = {
-    origin: [
-        process.env.VOTER_PORTAL_URL || 'http://localhost:5173',
-        process.env.OFFICER_DASHBOARD_URL || 'http://localhost:5174',
-        process.env.POLLING_BOOTH_URL || 'http://localhost:5175',
-        'https://vote-rakshak-4yld.vercel.app',
-        'https://vote-rakshak-git-main-mohd-arsans-projects.vercel.app',
-        'https://vote-rakshak.vercel.app'
-    ],
+    origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+
+        const allowedOrigins = [
+            'http://localhost:5173',
+            'http://localhost:5174',
+            'http://localhost:5175',
+        ];
+
+        if (
+            allowedOrigins.indexOf(origin) !== -1 ||
+            origin.endsWith('.vercel.app') ||
+            origin.endsWith('.railway.app')
+        ) {
+            callback(null, true);
+        } else {
+            console.warn(`Blocked by CORS: ${origin}`);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
 };

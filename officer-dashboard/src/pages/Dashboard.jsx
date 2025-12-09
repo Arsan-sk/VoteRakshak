@@ -99,7 +99,17 @@ function Dashboard() {
                 setSuccess('');
             }, 3000);
         } catch (err) {
-            setError(err.response?.data?.error || 'Failed to unlock booth');
+            console.error('❌ Unlock Error Details:', err.response?.data);
+            const errorMessage = err.response?.data?.error || 'Failed to unlock booth';
+            setError(errorMessage);
+
+            // Show alert for critical errors if any
+            if (err.response?.status === 404) {
+                // Check if it is a booth connection error
+                if (errorMessage.includes('not currently connected')) {
+                    alert(`⚠️ ${errorMessage}\nPlease ask the polling booth officer to refresh their page.`);
+                }
+            }
         } finally {
             setLoading(false);
         }
