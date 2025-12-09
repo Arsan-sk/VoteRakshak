@@ -78,6 +78,8 @@ function Register() {
 
             setStatus('✅ Registration successful!');
 
+            console.log(result.token, form.aadhar)
+            
             // Store token
             localStorage.setItem('voterToken', result.token);
             localStorage.setItem('voterAadhar', form.aadhar);
