@@ -1,0 +1,34 @@
+{
+    "name": "voterakshak-server",
+    "version": "1.0.0",
+    "description": "Backend server for distributed e-voting system",
+    "main": "server.js",
+    "type": "module",
+    "scripts": {
+        "dev": "nodemon server.js",
+        "start": "node server.js",
+        "deploy-contract": "node ../contracts/deploy.js"
+    },
+    "keywords": [
+        "voting",
+        "blockchain",
+        "websocket",
+        "biometric"
+    ],
+    "author": "",
+    "license": "MIT",
+    "dependencies": {
+        "express": "^4.18.2",
+        "socket.io": "^4.6.1",
+        "cors": "^2.8.5",
+        "ethers": "^6.15.0",
+        "dotenv": "^16.3.1",
+        "jsonwebtoken": "^9.0.2",
+        "bcryptjs": "^2.4.3",
+        "axios": "^1.13.2",
+        "multer": "^1.4.5-lts.1"
+    },
+    "devDependencies": {
+        "nodemon": "^3.0.1"
+    }
+}

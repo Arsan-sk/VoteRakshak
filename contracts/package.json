@@ -1,0 +1,13 @@
+{
+    "name": "voterakshak-contracts",
+    "version": "1.0.0",
+    "description": "Smart contracts for VoteRakshak e-voting system",
+    "main": "deploy.cjs",
+    "scripts": {
+        "deploy": "node deploy.cjs"
+    },
+    "dependencies": {
+        "ethers": "^6.15.0",
+        "solc": "0.8.19"
+    }
+}

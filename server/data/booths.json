@@ -1,0 +1,29 @@
+[
+  {
+    "id": "BOOTH_001",
+    "name": "Central Polling Station",
+    "address": "123 Main Street, Mumbai, Maharashtra",
+    "coordinates": {
+      "lat": 19.076,
+      "lng": 72.8777
+    }
+  },
+  {
+    "id": "BOOTH_002",
+    "name": "North District Center",
+    "address": "456 Park Avenue, Mumbai, Maharashtra",
+    "coordinates": {
+      "lat": 19.1136,
+      "lng": 72.8697
+    }
+  },
+  {
+    "id": "BOOTH_003",
+    "name": "South Community Hall",
+    "address": "789 Beach Road, Mumbai, Maharashtra",
+    "coordinates": {
+      "lat": 18.922,
+      "lng": 72.8347
+    }
+  }
+]
