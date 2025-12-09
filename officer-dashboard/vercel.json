@@ -1,5 +1,5 @@
 {
     "env": {
-        "VITE_BACKEND_URL": "https://voterakshak-production.up.railway.app"
+        "VITE_BACKEND_URL": "https://server-voterakshak-production.up.railway.app"
     }
 }
