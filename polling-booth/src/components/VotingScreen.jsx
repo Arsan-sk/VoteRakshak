@@ -7,10 +7,10 @@ import React, { useState } from 'react';
 import { castVote } from '../utils/api';
 
 const PARTIES = [
-    { id: 1, name: 'Liberty Party', symbol: '🗽', color: 'blue' },
-    { id: 2, name: 'Green Earth Alliance', symbol: '🌍', color: 'green' },
-    { id: 3, name: 'Progressive Coalition', symbol: '⚡', color: 'purple' },
-    { id: 4, name: 'United Future Front', symbol: '🚀', color: 'orange' },
+    { id: 1, name: 'ABC', symbol: '🗽', color: 'blue' },
+    { id: 2, name: 'XYZ', symbol: '🌍', color: 'green' },
+    { id: 3, name: 'PQR', symbol: '⚡', color: 'purple' },
+    { id: 4, name: 'LMN', symbol: '🚀', color: 'orange' },
 ];
 
 function VotingScreen({ authorizedVoter, onVoteSuccess }) {
@@ -69,19 +69,20 @@ function VotingScreen({ authorizedVoter, onVoteSuccess }) {
 
     async function submitVote(fingerprintTemplate) {
         try {
-            const result = await castVote(
+            console.log("Submitting vote with template length:", fingerprintTemplate?.length);
+            const voteResult = await castVote(
                 authorizedVoter.voterAadhar,
                 selectedParty,
                 fingerprintTemplate
             );
 
-            console.log('✅ Vote cast successfully:', result);
+            console.log('✅ Vote cast successfully:', voteResult);
 
             // Show success modal
-            onVoteSuccess(result.transactionHash);
+            onVoteSuccess(voteResult.transactionHash);
         } catch (err) {
             console.error('❌ Vote casting failed:', err);
-            setError(err.message || 'Failed to cast vote');
+            setError(err.message || 'Failed to cast vote. Please try again.');
             setIsProcessing(false);
             setShowConfirmation(false);
         }
@@ -140,8 +141,8 @@ function VotingScreen({ authorizedVoter, onVoteSuccess }) {
                                 key={party.id}
                                 onClick={() => setSelectedParty(party.id)}
                                 className={`p-6 rounded-xl border-2 transition-all duration-200 ${selectedParty === party.id
-                                        ? 'border-green-500 bg-green-900/50 scale-105'
-                                        : 'border-gray-600 bg-gray-700/50 hover:border-gray-500'
+                                    ? 'border-green-500 bg-green-900/50 scale-105'
+                                    : 'border-gray-600 bg-gray-700/50 hover:border-gray-500'
                                     }`}
                             >
                                 <div className="flex items-center space-x-4">
@@ -175,8 +176,8 @@ function VotingScreen({ authorizedVoter, onVoteSuccess }) {
                         onClick={handleConfirmVote}
                         disabled={!selectedParty || isProcessing}
                         className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${selectedParty && !isProcessing
-                                ? 'bg-green-600 hover:bg-green-500 text-white shadow-lg hover:shadow-green-500/50'
-                                : 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                            ? 'bg-green-600 hover:bg-green-500 text-white shadow-lg hover:shadow-green-500/50'
+                            : 'bg-gray-600 text-gray-400 cursor-not-allowed'
                             }`}
                     >
                         {isProcessing ? 'Processing...' : 'Confirm Vote'}

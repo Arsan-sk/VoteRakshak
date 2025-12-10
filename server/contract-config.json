@@ -1,19 +1,8 @@
 {
-  "contractAddress": "0xA827e8aBD7dC5ff28B599b5df450daF7a202592d",
+  "contractAddress": "0x4344276D59dfC66D3f635e993Ef0ce667d6580D6",
   "abi": [
     {
-      "inputs": [
-        {
-          "internalType": "uint256",
-          "name": "_startTime",
-          "type": "uint256"
-        },
-        {
-          "internalType": "uint256",
-          "name": "_endTime",
-          "type": "uint256"
-        }
-      ],
+      "inputs": [],
       "stateMutability": "nonpayable",
       "type": "constructor"
     },
@@ -27,7 +16,7 @@
           "type": "bytes32"
         },
         {
-          "indexed": true,
+          "indexed": false,
           "internalType": "uint256",
           "name": "partyId",
           "type": "uint256"
@@ -40,25 +29,6 @@
         }
       ],
       "name": "VoteCast",
-      "type": "event"
-    },
-    {
-      "anonymous": false,
-      "inputs": [
-        {
-          "indexed": false,
-          "internalType": "uint256",
-          "name": "newStartTime",
-          "type": "uint256"
-        },
-        {
-          "indexed": false,
-          "internalType": "uint256",
-          "name": "newEndTime",
-          "type": "uint256"
-        }
-      ],
-      "name": "VotingPeriodUpdated",
       "type": "event"
     },
     {
@@ -93,14 +63,8 @@
       "type": "function"
     },
     {
-      "inputs": [
-        {
-          "internalType": "bytes32",
-          "name": "voterHash",
-          "type": "bytes32"
-        }
-      ],
-      "name": "checkIfVoted",
+      "inputs": [],
+      "name": "electionEnded",
       "outputs": [
         {
           "internalType": "bool",
@@ -113,15 +77,9 @@
     },
     {
       "inputs": [],
-      "name": "endTime",
-      "outputs": [
-        {
-          "internalType": "uint256",
-          "name": "",
-          "type": "uint256"
-        }
-      ],
-      "stateMutability": "view",
+      "name": "endElection",
+      "outputs": [],
+      "stateMutability": "nonpayable",
       "type": "function"
     },
     {
@@ -138,36 +96,17 @@
       "type": "function"
     },
     {
-      "inputs": [
-        {
-          "internalType": "uint256",
-          "name": "partyId",
-          "type": "uint256"
-        }
-      ],
-      "name": "getVoteCount",
-      "outputs": [
-        {
-          "internalType": "uint256",
-          "name": "",
-          "type": "uint256"
-        }
-      ],
-      "stateMutability": "view",
-      "type": "function"
-    },
-    {
       "inputs": [],
       "name": "getVotingStatus",
       "outputs": [
         {
           "internalType": "bool",
-          "name": "isActive",
+          "name": "active",
           "type": "bool"
         },
         {
           "internalType": "uint256",
-          "name": "timeRemaining",
+          "name": "timeLeft",
           "type": "uint256"
         }
       ],
@@ -178,7 +117,7 @@
       "inputs": [
         {
           "internalType": "bytes32",
-          "name": "",
+          "name": "voterHash",
           "type": "bytes32"
         }
       ],
@@ -188,19 +127,6 @@
           "internalType": "bool",
           "name": "",
           "type": "bool"
-        }
-      ],
-      "stateMutability": "view",
-      "type": "function"
-    },
-    {
-      "inputs": [],
-      "name": "startTime",
-      "outputs": [
-        {
-          "internalType": "uint256",
-          "name": "",
-          "type": "uint256"
         }
       ],
       "stateMutability": "view",
@@ -223,24 +149,6 @@
       "inputs": [
         {
           "internalType": "uint256",
-          "name": "_newStartTime",
-          "type": "uint256"
-        },
-        {
-          "internalType": "uint256",
-          "name": "_newEndTime",
-          "type": "uint256"
-        }
-      ],
-      "name": "updateVotingPeriod",
-      "outputs": [],
-      "stateMutability": "nonpayable",
-      "type": "function"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "uint256",
           "name": "",
           "type": "uint256"
         }
@@ -255,15 +163,19 @@
       ],
       "stateMutability": "view",
       "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "votingEndTime",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
     }
-  ],
-  "network": "ganache",
-  "ganacheUrl": "http://127.0.0.1:7545",
-  "deployedAt": "2025-12-09T12:06:40.930Z",
-  "votingPeriod": {
-    "startTime": 1765282000,
-    "endTime": 1765368400,
-    "durationHours": 24
-  },
-  "admin": "0x339788427cBBb785AEaDEE62f38B031704C38207"
+  ]
 }

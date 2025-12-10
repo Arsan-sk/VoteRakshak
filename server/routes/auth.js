@@ -67,7 +67,8 @@ router.post('/register', async (req, res) => {
             age,
             aadhar,
             phone,
-            photo,
+            phone,
+            photo = 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQmwCmC6pZjmJZsvvNufFvqxJf7_C73ff3_Bg&s', // Default image
             fingerprintTemplate,
         } = req.body;
 

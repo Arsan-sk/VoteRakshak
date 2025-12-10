@@ -10,7 +10,7 @@ const solc = require('solc');
 
 // Configuration
 const GANACHE_URL = 'http://127.0.0.1:7545';
-const PRIVATE_KEY = '0x3956e5d838a2a8a65e70008ea3168765886670179ae42397506626ec47f85591'; // Replace with Ganache account private key
+const PRIVATE_KEY = '0x3441cac3ec4eaf479b465b0ebc53d2133e76d022743be7237aae69e7ce50a475'; // Replace with Ganache account private key
 
 // Voting period configuration (example: 24 hours from now)
 const VOTING_DURATION_HOURS = 24;

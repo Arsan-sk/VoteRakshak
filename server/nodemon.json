@@ -1,0 +1,8 @@
+{
+    "ignore": [
+        "data/*",
+        "contract-config.json",
+        "*.log"
+    ],
+    "ext": "js,json"
+}
