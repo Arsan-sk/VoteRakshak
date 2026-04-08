@@ -1,7 +1,8 @@
 /**
- * Authentication Routes — Phase 2
- * - Voter registration with roll number (replaces Aadhaar)
- * - BLO login (from DB, not hardcoded)
+ * Authentication Routes — Phase 2 (Updated)
+ * - Voter registration with roll number + 4-digit PIN
+ * - Voter login: roll number + PIN
+ * - BLO login (from DB, bcrypt)
  * - Admin login (separate JWT)
  */
 
@@ -20,7 +21,6 @@ const YEARS = ['1', '2', '3', '4'];
 function generateToken(payload) {
     return jwt.sign(payload, process.env.JWT_SECRET || 'fallback_secret', { expiresIn: '24h' });
 }
-
 function generateAdminToken(payload) {
     return jwt.sign(payload, process.env.ADMIN_JWT_SECRET || 'admin_fallback_secret', { expiresIn: '12h' });
 }
@@ -29,21 +29,15 @@ function generateAdminToken(payload) {
 
 /**
  * POST /api/auth/register
- * Register a new student voter
- * Fields: firstName, middleName, lastName, rollNumber, phone, department, year, imageUrl, fingerprintTemplate
+ * Fields: firstName, middleName, lastName, rollNumber, phone, department, year, imageUrl, pin, fingerprintTemplate
  */
 router.post('/register', async (req, res) => {
     try {
         const {
-            firstName,
-            middleName,
-            lastName,
-            rollNumber,
-            phone,
-            department,
-            year,
-            imageUrl,
-            fingerprintTemplate,
+            firstName, middleName, lastName,
+            rollNumber, phone, department, year,
+            imageUrl, fingerprintTemplate,
+            pin,  // 4-digit PIN (new field)
         } = req.body;
 
         // Validate required fields
@@ -53,51 +47,41 @@ router.post('/register', async (req, res) => {
             });
         }
 
-        // Validate department
+        // Validate PIN
+        if (!pin || !/^\d{4}$/.test(String(pin))) {
+            return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
+        }
+
         if (!DEPARTMENTS.includes(department)) {
             return res.status(400).json({ error: `Invalid department. Must be one of: ${DEPARTMENTS.join(', ')}` });
         }
-
-        // Validate year
         if (!YEARS.includes(String(year))) {
             return res.status(400).json({ error: 'Invalid year. Must be 1, 2, 3, or 4' });
         }
-
-        // Validate phone
         if (!/^\d{10}$/.test(phone)) {
             return res.status(400).json({ error: 'Phone number must be 10 digits' });
         }
 
-        // Soft-validate roll number format: YYDEPTSRNO (e.g. 23EC59)
-        const rollRegex = /^\d{2}[A-Z]{2,4}\d{1,3}$/i;
-        if (!rollRegex.test(rollNumber)) {
-            console.warn(`⚠️ Roll number format mismatch: ${rollNumber} (not blocking)`);
-        }
-
         const normalizedRoll = rollNumber.toUpperCase();
 
-        // Check if roll number already registered
         const existing = await db.getStudentByRollNumber(normalizedRoll);
         if (existing) {
             return res.status(409).json({ error: 'Roll number already registered' });
         }
 
+        // Hash the PIN
+        const pinHash = await bcrypt.hash(String(pin), 10);
+
         // Handle fingerprint (optional in dev)
         let fingerprintId = null;
         const fingerprintRequired = process.env.FINGERPRINT_REQUIRED === 'true';
-
         if (fingerprintRequired) {
-            if (!fingerprintTemplate) {
-                return res.status(400).json({ error: 'Fingerprint is required for registration' });
-            }
-            if (!validateTemplate(fingerprintTemplate)) {
-                return res.status(400).json({ error: 'Invalid fingerprint template' });
-            }
+            if (!fingerprintTemplate) return res.status(400).json({ error: 'Fingerprint is required' });
+            if (!validateTemplate(fingerprintTemplate)) return res.status(400).json({ error: 'Invalid fingerprint template' });
             const voterHash = hashRollNumber(normalizedRoll);
             const biometricResult = await registerFingerprint(fingerprintTemplate, voterHash);
             fingerprintId = biometricResult.templateId;
         } else if (fingerprintTemplate) {
-            // Optional dev scan — store if provided
             try {
                 if (validateTemplate(fingerprintTemplate)) {
                     const voterHash = hashRollNumber(normalizedRoll);
@@ -109,16 +93,13 @@ router.post('/register', async (req, res) => {
             }
         }
 
-        // Get booth assignment by department
         const booth = await db.getBoothByDept(department);
         if (!booth) {
             return res.status(500).json({ error: `No booth found for department ${department}` });
         }
 
-        // Generate voter hash
         const voterHash = hashRollNumber(normalizedRoll);
 
-        // Create student record
         const newStudent = {
             first_name: firstName,
             middle_name: middleName || null,
@@ -131,6 +112,7 @@ router.post('/register', async (req, res) => {
             fingerprint_id: fingerprintId,
             voter_hash: voterHash,
             booth_id: booth.id,
+            pin_hash: pinHash,
         };
 
         const created = await db.createStudent(newStudent);
@@ -171,27 +153,23 @@ router.post('/register', async (req, res) => {
 
 /**
  * POST /api/auth/login
- * Voter login by roll number, BLO login by username/password
+ * - Voter: roll number + 4-digit PIN
+ * - BLO/Officer: username + password
  */
 router.post('/login', async (req, res) => {
     try {
-        const { role, rollNumber, username, password } = req.body;
+        const { role, rollNumber, pin, username, password } = req.body;
 
         // ----- BLO Login -----
         if (role === 'officer' || role === 'blo') {
             if (!username || !password) {
                 return res.status(400).json({ error: 'Username and password required' });
             }
-
             const blo = await db.getBLOByUsername(username);
-            if (!blo) {
-                return res.status(401).json({ error: 'Invalid credentials' });
-            }
+            if (!blo) return res.status(401).json({ error: 'Invalid credentials' });
 
             const passwordMatch = await bcrypt.compare(password, blo.password_hash);
-            if (!passwordMatch) {
-                return res.status(401).json({ error: 'Invalid credentials' });
-            }
+            if (!passwordMatch) return res.status(401).json({ error: 'Invalid credentials' });
 
             const token = generateToken({
                 userId: blo.id,
@@ -220,15 +198,31 @@ router.post('/login', async (req, res) => {
             });
         }
 
-        // ----- Voter Login (by roll number) -----
+        // ----- Voter Login: roll number + PIN -----
         if (role === 'voter') {
-            if (!rollNumber) {
-                return res.status(400).json({ error: 'Roll number required for voter login' });
+            if (!rollNumber || !pin) {
+                return res.status(400).json({ error: 'Roll number and PIN required' });
+            }
+            if (!/^\d{4}$/.test(String(pin))) {
+                return res.status(400).json({ error: 'PIN must be 4 digits' });
             }
 
-            const student = await db.getStudentByRollNumber(rollNumber);
+            const student = await db.getStudentByRollNumber(rollNumber.toUpperCase());
             if (!student) {
-                return res.status(404).json({ error: 'Voter not found. Please register first.' });
+                return res.status(404).json({ error: 'Roll number not found. Please register first.' });
+            }
+
+            // Verify PIN
+            if (!student.pin_hash) {
+                // Legacy fallback: if no pin_hash, accept default '1234'
+                if (String(pin) !== '1234') {
+                    return res.status(401).json({ error: 'Invalid PIN' });
+                }
+            } else {
+                const pinMatch = await bcrypt.compare(String(pin), student.pin_hash);
+                if (!pinMatch) {
+                    return res.status(401).json({ error: 'Invalid PIN' });
+                }
             }
 
             const token = generateToken({
@@ -268,30 +262,20 @@ router.post('/login', async (req, res) => {
 
 // =================== Admin Login ===================
 
-/**
- * POST /api/auth/admin/login
- * Admin login with separate credentials and JWT secret
- */
 router.post('/admin/login', async (req, res) => {
     try {
         const { username, password } = req.body;
-
         const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin@vote.rakshak';
         const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin@secure123';
 
         if (!username || !password) {
             return res.status(400).json({ error: 'Username and password required' });
         }
-
         if (username !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
             return res.status(401).json({ error: 'Invalid admin credentials' });
         }
 
-        const token = generateAdminToken({
-            username,
-            role: 'admin',
-        });
-
+        const token = generateAdminToken({ username, role: 'admin' });
         console.log(`✅ Admin logged in: ${username}`);
 
         return res.json({
@@ -311,15 +295,10 @@ router.post('/admin/login', async (req, res) => {
 export function authenticateToken(req, res, next) {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
-
-    if (!token) {
-        return res.status(401).json({ error: 'Access token required' });
-    }
+    if (!token) return res.status(401).json({ error: 'Access token required' });
 
     jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret', (err, user) => {
-        if (err) {
-            return res.status(403).json({ error: 'Invalid or expired token' });
-        }
+        if (err) return res.status(403).json({ error: 'Invalid or expired token' });
         req.user = user;
         next();
     });

@@ -28,6 +28,8 @@ function Register() {
         department: '',
         year: '',
         imageUrl: '',
+        pin: '',
+        confirmPin: '',
     });
     const [imageFile, setImageFile] = useState(null);
     const [imagePreview, setImagePreview] = useState('');
@@ -79,8 +81,16 @@ function Register() {
     async function handleRegister(e) {
         e.preventDefault();
 
-        if (!form.rollNumber || !form.department || !form.year) {
-            setStatus('❌ Please fill all required fields');
+        if (!form.rollNumber || !form.department || !form.year || !form.pin) {
+            setStatus('❌ Please fill all required fields including PIN');
+            return;
+        }
+        if (!/^\d{4}$/.test(form.pin)) {
+            setStatus('❌ PIN must be exactly 4 digits');
+            return;
+        }
+        if (form.pin !== form.confirmPin) {
+            setStatus('❌ PINs do not match');
             return;
         }
 
@@ -98,6 +108,7 @@ function Register() {
                 year: form.year,
                 imageUrl: form.imageUrl || null,
                 fingerprintTemplate: fingerprint || null,
+                pin: form.pin,
             };
 
             const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
@@ -177,6 +188,25 @@ function Register() {
                                 <input type="tel" className={inputCls} placeholder="10-digit mobile"
                                     value={form.phone} pattern="[0-9]{10}" maxLength="10"
                                     onChange={e => setForm({ ...form, phone: e.target.value })} required />
+                            </div>
+                        </div>
+
+                        {/* PIN */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className={labelCls}>4-Digit PIN *</label>
+                                <input type="password" className={inputCls} placeholder="Choose a 4-digit PIN"
+                                    value={form.pin} maxLength={4} inputMode="numeric" pattern="\d{4}"
+                                    onChange={e => setForm({ ...form, pin: e.target.value.replace(/\D/g, '').slice(0, 4) })}
+                                    required />
+                                <p className="text-xs text-gray-500 mt-1">You'll use this to login later</p>
+                            </div>
+                            <div>
+                                <label className={labelCls}>Confirm PIN *</label>
+                                <input type="password" className={inputCls} placeholder="Re-enter your PIN"
+                                    value={form.confirmPin} maxLength={4} inputMode="numeric" pattern="\d{4}"
+                                    onChange={e => setForm({ ...form, confirmPin: e.target.value.replace(/\D/g, '').slice(0, 4) })}
+                                    required />
                             </div>
                         </div>
 

@@ -52,9 +52,9 @@ function Home() {
                         className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3.5 rounded-xl font-bold text-lg transition-all shadow-lg hover:shadow-indigo-500/30 hover:-translate-y-0.5">
                         📝 Register to Vote
                     </button>
-                    <button onClick={() => navigate('/profile')}
+                    <button onClick={() => navigate('/login')}
                         className="bg-gray-700 hover:bg-gray-600 text-white px-8 py-3.5 rounded-xl font-bold text-lg transition-all shadow-lg">
-                        👤 My Profile
+                        🔐 Login
                     </button>
                 </div>
             </section>
