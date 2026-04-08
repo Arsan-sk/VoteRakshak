@@ -7,17 +7,16 @@
 ALTER TABLE students
 ADD COLUMN IF NOT EXISTS pin_hash TEXT DEFAULT NULL;
 
--- 2. Set default PIN '1234' (bcrypt hash) for all existing students
---    bcrypt hash of '1234' with saltRounds=10
+-- 2. Set default PIN '1234' (correct bcrypt hash) for all existing students
+--    Generated via: bcrypt.hash('1234', 10)
 UPDATE students
-SET pin_hash = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy'
-WHERE pin_hash IS NULL;
+SET pin_hash = '$2a$10$xfZJ4yG5GVy8gF92.8fkW.DvdbXNfjqNlAWeB7AjgNo4FDzB/NSJK'
+WHERE pin_hash IS NULL
+   OR pin_hash = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
 
--- 3. Add NOT NULL constraint with default after backfill
---    (optional - leave nullable so registration can set it properly)
--- ALTER TABLE students ALTER COLUMN pin_hash SET NOT NULL;
+-- The second condition also fixes students that got the WRONG hash from the old migration
 
--- Verify the update
+-- 3. Verify
 SELECT id, roll_number, first_name, last_name,
        CASE WHEN pin_hash IS NOT NULL THEN '✅ PIN set' ELSE '❌ No PIN' END AS pin_status
 FROM students;
