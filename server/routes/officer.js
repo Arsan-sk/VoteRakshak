@@ -13,6 +13,7 @@ import {
     addAuditLog,
     getAuditLogs,
 } from '../utils/supabaseClient.js';
+import { getFlag } from '../utils/flagsManager.js';
 
 const router = express.Router();
 
@@ -200,7 +201,7 @@ router.post('/unlock-booth', authenticateToken, async (req, res) => {
             electionType: activeElection?.election_type || null,
             candidates: candidateList,
             // Auth mode: booth uses this to decide fingerprint vs PIN confirmation
-            biometricMode: process.env.BIOMETRIC_MODE === 'true',
+            biometricMode: await getFlag('biometric_mode'),
         };
 
         io.to(`booth_${boothId}`).emit('allow_vote', eventData);

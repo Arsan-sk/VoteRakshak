@@ -11,6 +11,7 @@ import {
     getElectedPositions,
 } from '../utils/supabaseClient.js';
 import { getVoteCount } from '../utils/blockchain.js';
+import { getAllFlags } from '../utils/flagsManager.js';
 
 const router = express.Router();
 
@@ -125,6 +126,21 @@ router.get('/elected-positions', async (req, res) => {
     } catch (error) {
         console.error('❌ Public elected-positions error:', error);
         res.status(500).json({ error: 'Failed to get elected positions', message: error.message });
+    }
+});
+
+/**
+ * GET /api/public/flags
+ * Returns all system flags (read-only, no auth)
+ * Used by booth and voter portal to pick up flag changes dynamically
+ */
+router.get('/flags', async (req, res) => {
+    try {
+        const flags = await getAllFlags();
+        res.json({ success: true, flags });
+    } catch (error) {
+        console.error('❌ Public flags error:', error);
+        res.status(500).json({ error: 'Failed to get flags', message: error.message });
     }
 });
 

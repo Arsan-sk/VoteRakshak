@@ -35,6 +35,15 @@ import {
     getVoteCount,
     generateElectionId,
 } from '../utils/blockchain.js';
+import { getAllFlags, refreshFlags } from '../utils/flagsManager.js';
+import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+dotenv.config();
+const _supabase = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_ANON_KEY,
+    { auth: { persistSession: false } }
+);
 
 const router = express.Router();
 
@@ -495,6 +504,65 @@ router.get('/results/live/:electionId', async (req, res) => {
     } catch (error) {
         console.error('❌ Live results error:', error);
         res.status(500).json({ error: 'Failed to get live results', message: error.message });
+    }
+});
+
+// ─── SYSTEM FLAGS ───────────────────────────────────────────────────
+
+/**
+ * GET /api/admin/flags
+ * Read all system flags
+ */
+router.get('/flags', async (req, res) => {
+    try {
+        const flags = await getAllFlags();
+        res.json({ success: true, flags });
+    } catch (error) {
+        console.error('❌ Get flags error:', error);
+        res.status(500).json({ error: 'Failed to get flags', message: error.message });
+    }
+});
+
+/**
+ * PUT /api/admin/flags/:key
+ * Set a single flag value (true/false)
+ * Body: { value: boolean }
+ * Immediately refreshes the in-memory cache.
+ */
+router.put('/flags/:key', async (req, res) => {
+    try {
+        const { key } = req.params;
+        const { value } = req.body;
+
+        if (typeof value !== 'boolean') {
+            return res.status(400).json({ error: '"value" must be a boolean (true or false)' });
+        }
+
+        const { data, error } = await _supabase
+            .from('system_flags')
+            .update({ value })
+            .eq('key', key)
+            .select()
+            .single();
+
+        if (error || !data) {
+            return res.status(404).json({ error: `Flag "${key}" not found or update failed`, detail: error?.message });
+        }
+
+        // Force refresh the cache so next request picks up new value immediately
+        const newFlags = await refreshFlags();
+
+        console.log(`🏁 [Admin] Flag "${key}" set to ${value} by ${req.admin.username}`);
+
+        res.json({
+            success: true,
+            message: `Flag "${key}" updated to ${value}`,
+            flag: data,
+            allFlags: newFlags,
+        });
+    } catch (error) {
+        console.error('❌ Update flag error:', error);
+        res.status(500).json({ error: 'Failed to update flag', message: error.message });
     }
 });
 

@@ -25,6 +25,7 @@ import {
     getUnreadNotificationCount,
     addAuditLog,
 } from '../utils/supabaseClient.js';
+import { getFlag } from '../utils/flagsManager.js';
 
 const router = express.Router();
 
@@ -194,8 +195,8 @@ router.post('/cast', async (req, res) => {
             return res.status(400).json({ error: 'Invalid candidate for this election' });
         }
 
-        // ── Identity Verification (mode-aware) ──────────────────
-        const biometricMode = process.env.BIOMETRIC_MODE === 'true';
+        // ── Identity Verification (mode-aware) ──────────────────────
+        const biometricMode = await getFlag('biometric_mode');
 
         if (biometricMode) {
             // FINGERPRINT mode

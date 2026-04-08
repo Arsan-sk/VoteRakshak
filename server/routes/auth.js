@@ -12,6 +12,7 @@ import bcrypt from 'bcryptjs';
 import { registerFingerprint, validateTemplate } from '../utils/biometric.js';
 import { hashRollNumber } from '../utils/blockchain.js';
 import * as db from '../utils/supabaseClient.js';
+import { getFlag } from '../utils/flagsManager.js';
 
 const router = express.Router();
 
@@ -72,9 +73,9 @@ router.post('/register', async (req, res) => {
         // Hash the PIN
         const pinHash = await bcrypt.hash(String(pin), 10);
 
-        // Handle fingerprint (optional in dev)
+        // Handle fingerprint (optional in dev — controlled by DB flag)
         let fingerprintId = null;
-        const fingerprintRequired = process.env.FINGERPRINT_REQUIRED === 'true';
+        const fingerprintRequired = await getFlag('fingerprint_required');
         if (fingerprintRequired) {
             if (!fingerprintTemplate) return res.status(400).json({ error: 'Fingerprint is required' });
             if (!validateTemplate(fingerprintTemplate)) return res.status(400).json({ error: 'Invalid fingerprint template' });

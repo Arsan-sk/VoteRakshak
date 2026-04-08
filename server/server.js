@@ -18,6 +18,7 @@ import officerRoutes from './routes/officer.js';
 import adminRoutes from './routes/admin.js';
 import publicRoutes from './routes/public.js';
 import debugRoutes from './routes/debug.js';
+import { initFlags } from './utils/flagsManager.js';
 
 dotenv.config();
 
@@ -190,6 +191,13 @@ httpServer.listen(PORT, async () => {
     console.log(`🔌 WebSocket: ws://localhost:${PORT}`);
     console.log(`🌍 Env:       ${process.env.NODE_ENV || 'development'}`);
     console.log('═══════════════════════════════════════════════════');
+
+    // Pre-warm system flags from DB
+    try {
+        await initFlags();
+    } catch (err) {
+        console.warn('⚠️ System flags init failed (DB may not be ready):', err.message);
+    }
 
     try {
         const { initializeBlockchain, listenForVotes } = await import('./utils/blockchain.js');
