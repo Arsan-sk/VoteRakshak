@@ -194,15 +194,44 @@ router.post('/cast', async (req, res) => {
             return res.status(400).json({ error: 'Invalid candidate for this election' });
         }
 
-        // Verify fingerprint (if provided and required)
-        const fingerprintRequired = process.env.FINGERPRINT_REQUIRED === 'true';
-        if (fingerprintRequired && student.fingerprint_id) {
-            if (!fingerprintTemplate) {
-                return res.status(400).json({ error: 'Fingerprint required' });
+        // ── Identity Verification (mode-aware) ──────────────────
+        const biometricMode = process.env.BIOMETRIC_MODE === 'true';
+
+        if (biometricMode) {
+            // FINGERPRINT mode
+            if (student.fingerprint_id) {
+                if (!fingerprintTemplate) {
+                    return res.status(400).json({ error: 'Fingerprint scan required to cast vote' });
+                }
+                const verification = await verifyFingerprint(student.fingerprint_id, fingerprintTemplate);
+                if (!verification.verified) {
+                    return res.status(401).json({
+                        error: 'Fingerprint verification failed',
+                        score: verification.score,
+                        wrongAuth: true,
+                    });
+                }
             }
-            const verification = await verifyFingerprint(student.fingerprint_id, fingerprintTemplate);
-            if (!verification.verified) {
-                return res.status(401).json({ error: 'Fingerprint verification failed', score: verification.score });
+        } else {
+            // PIN mode — pin comes in req.body
+            const { pin } = req.body;
+            if (!pin) {
+                return res.status(400).json({ error: 'PIN required to cast vote (BIOMETRIC_MODE=false)', wrongAuth: true });
+            }
+            if (!/^\d{4}$/.test(String(pin))) {
+                return res.status(400).json({ error: 'PIN must be 4 digits', wrongAuth: true });
+            }
+            if (!student.pin_hash) {
+                // Legacy: accept '1234' as default when no hash set
+                if (String(pin) !== '1234') {
+                    return res.status(401).json({ error: 'Incorrect PIN. Try again.', wrongAuth: true });
+                }
+            } else {
+                const { default: bcrypt } = await import('bcryptjs');
+                const pinMatch = await bcrypt.compare(String(pin), student.pin_hash);
+                if (!pinMatch) {
+                    return res.status(401).json({ error: 'Incorrect PIN. Try again.', wrongAuth: true });
+                }
             }
         }
 

@@ -95,6 +95,20 @@ function App() {
         fetchActiveElection();
     }
 
+    function handleBoothLocked(reason) {
+        console.warn('🔒 Booth locked:', reason);
+        updateBoothStatus('locked');
+        // Reset to idle after showing message for 2s
+        setTimeout(() => {
+            setIsUnlocked(false);
+            setAuthorizedVoter(null);
+            setShowSuccess(false);
+            setTransactionHash('');
+            updateBoothStatus('idle');
+            fetchActiveElection();
+        }, 2000);
+    }
+
     function handleSuccessClose() {
         setShowSuccess(false);
         setTimeout(resetBooth, 500);
@@ -114,6 +128,7 @@ function App() {
                     activeElection={activeElection}
                     candidates={candidates}
                     onVoteSuccess={handleVoteSuccess}
+                    onBoothLocked={handleBoothLocked}
                 />
             )}
 

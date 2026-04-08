@@ -9,6 +9,7 @@ import {
     getStudentByRollNumber,
     getBLOById,
     getActiveElection,
+    hasStudentVoted,
     addAuditLog,
     getAuditLogs,
 } from '../utils/supabaseClient.js';
@@ -106,7 +107,25 @@ router.post('/unlock-booth', authenticateToken, async (req, res) => {
             return res.status(404).json({ error: 'Student not found' });
         }
 
-        // Department mismatch check
+        // ── ALREADY VOTED CHECK (block at BLO side, not booth side) ──
+        const activeElection = await getActiveElection();
+        if (activeElection) {
+            const alreadyVoted = await hasStudentVoted(activeElection.id, student.id);
+            if (alreadyVoted) {
+                await addAuditLog({
+                    event_type: 'ALREADY_VOTED_BLOCKED',
+                    blo_id: req.user.userId,
+                    booth_id: boothId,
+                    student_id: student.id,
+                    election_id: activeElection.id,
+                    details: { reason: 'BLO tried to unlock booth for already-voted student' },
+                }).catch(() => {});
+                return res.status(403).json({
+                    error: `❌ ${student.first_name} ${student.last_name} (${student.roll_number}) has already voted in this election.`,
+                    alreadyVoted: true,
+                });
+            }
+        }
         const bloDepart = req.user.department;
         if (bloDepart && student.department !== bloDepart) {
             await addAuditLog({
@@ -127,8 +146,7 @@ router.post('/unlock-booth', authenticateToken, async (req, res) => {
             });
         }
 
-        // Active election scope validation
-        const activeElection = await getActiveElection();
+        // Active election scope validation (activeElection already fetched in vote-check above)
         if (activeElection) {
             // DR: only the specific dept booth can be unlocked
             if (activeElection.election_type === 'DR' && activeElection.department) {
@@ -181,6 +199,8 @@ router.post('/unlock-booth', authenticateToken, async (req, res) => {
             blockchainElectionId: activeElection?.blockchain_election_id || null,
             electionType: activeElection?.election_type || null,
             candidates: candidateList,
+            // Auth mode: booth uses this to decide fingerprint vs PIN confirmation
+            biometricMode: process.env.BIOMETRIC_MODE === 'true',
         };
 
         io.to(`booth_${boothId}`).emit('allow_vote', eventData);
