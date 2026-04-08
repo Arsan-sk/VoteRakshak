@@ -1,261 +1,280 @@
 /**
- * Voter Registration Page with SecuGen Fingerprint Integration
+ * Student Voter Registration Page — Phase 2
+ * Roll number replaces Aadhaar. Adds dept, year, phone, image fields.
  */
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { registerVoter } from '../utils/api';
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+
+const DEPARTMENTS = [
+    { code: 'CO',  name: 'Computer Engineering' },
+    { code: 'AI',  name: 'Artificial Intelligence & ML' },
+    { code: 'DS',  name: 'Data Science' },
+    { code: 'ECS', name: 'Electronics & Computer Science' },
+    { code: 'ME',  name: 'Mechanical Engineering' },
+    { code: 'CE',  name: 'Civil Engineering' },
+    { code: 'EE',  name: 'Electrical Engineering' },
+];
 
 function Register() {
     const [form, setForm] = useState({
         firstName: '',
         middleName: '',
         lastName: '',
-        age: '',
-        aadhar: '',
+        rollNumber: '',
         phone: '',
-        photo: '',
+        department: '',
+        year: '',
+        imageUrl: '',
     });
+    const [imageFile, setImageFile] = useState(null);
+    const [imagePreview, setImagePreview] = useState('');
     const [fingerprint, setFingerprint] = useState('');
     const [fpImage, setFpImage] = useState('');
+    const [fpStatus, setFpStatus] = useState('');
     const [status, setStatus] = useState('');
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
 
-    // SecuGen API Integration
-    function callSGIFPGetData(successCall, failCall) {
+    // ── Fingerprint capture (SecuGen) ─────────────────────────
+    function captureFingerprint() {
+        setFpStatus('Scanning fingerprint...');
         const uri = 'https://localhost:8000/SGIFPCapture';
-        const xmlhttp = new XMLHttpRequest();
-        xmlhttp.onreadystatechange = function () {
-            if (xmlhttp.readyState === 4 && xmlhttp.status === 200) {
-                const fpobject = JSON.parse(xmlhttp.responseText);
-                successCall(fpobject);
-            } else if (xmlhttp.status === 404) {
-                failCall(xmlhttp.status);
+        const xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState === 4 && xhr.status === 200) {
+                const result = JSON.parse(xhr.responseText);
+                if (result.ErrorCode === 0) {
+                    if (result.BMPBase64?.length > 0) setFpImage('data:image/bmp;base64,' + result.BMPBase64);
+                    setFingerprint(result.TemplateBase64);
+                    setFpStatus('✅ Fingerprint captured');
+                } else {
+                    setFpStatus('❌ Error: ' + result.ErrorCode);
+                }
+            } else if (xhr.status === 404) {
+                setFpStatus('❌ SGIBioSrv returned 404');
             }
         };
-        xmlhttp.onerror = function () {
-            failCall(xmlhttp.status);
+        xhr.onerror = () => setFpStatus('❌ Cannot reach SGIBioSrv (port 8000). Running in dev mode — fingerprint optional.');
+        xhr.open('POST', uri, true);
+        xhr.send();
+    }
+
+    // ── Image file to base64 ──────────────────────────────────
+    function handleImageFile(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        setImageFile(file);
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            setImagePreview(ev.target.result);
+            setForm(f => ({ ...f, imageUrl: ev.target.result }));
         };
-        xmlhttp.open('POST', uri, true);
-        xmlhttp.send();
+        reader.readAsDataURL(file);
     }
 
-    function captureFingerprint() {
-        setStatus('Capturing fingerprint...');
-        callSGIFPGetData(
-            (result) => {
-                if (result.ErrorCode === 0) {
-                    if (result.BMPBase64?.length > 0) {
-                        setFpImage('data:image/bmp;base64,' + result.BMPBase64);
-                    }
-                    setFingerprint(result.TemplateBase64);
-                    setStatus('✅ Fingerprint captured successfully');
-                } else {
-                    setStatus('❌ Error capturing fingerprint: ' + result.ErrorCode);
-                }
-            },
-            () => setStatus('❌ Check if SGIBioSrv is running on port 8000')
-        );
-    }
-
+    // ── Registration submit ───────────────────────────────────
     async function handleRegister(e) {
         e.preventDefault();
 
-        if (!fingerprint) {
-            setStatus('❌ Please capture fingerprint first');
+        if (!form.rollNumber || !form.department || !form.year) {
+            setStatus('❌ Please fill all required fields');
             return;
         }
 
         setLoading(true);
-        setStatus('Registering voter...');
+        setStatus('Registering student...');
 
         try {
-            const result = await registerVoter({
-                ...form,
-                fingerprintTemplate: fingerprint,
+            const payload = {
+                firstName: form.firstName,
+                middleName: form.middleName,
+                lastName: form.lastName,
+                rollNumber: form.rollNumber.toUpperCase(),
+                phone: form.phone,
+                department: form.department,
+                year: form.year,
+                imageUrl: form.imageUrl || null,
+                fingerprintTemplate: fingerprint || null,
+            };
+
+            const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
             });
+            const data = await res.json();
 
-            setStatus('✅ Registration successful!');
+            if (!res.ok) throw new Error(data.error || 'Registration failed');
 
-            console.log(result.token, form.aadhar)
-            
-            // Store token
-            localStorage.setItem('voterToken', result.token);
-            localStorage.setItem('voterAadhar', form.aadhar);
+            localStorage.setItem('voterToken', data.token);
+            localStorage.setItem('voterRollNumber', data.user.rollNumber);
+            localStorage.setItem('voterId', data.user.id);
 
-            // Navigate to profile after 2 seconds
-            setTimeout(() => {
-                navigate('/profile');
-            }, 2000);
-        } catch (error) {
-            setStatus('❌ ' + (error.response?.data?.error || 'Registration failed'));
+            setStatus('✅ Registration successful! Redirecting...');
+            setTimeout(() => navigate('/profile'), 1800);
+        } catch (err) {
+            setStatus('❌ ' + err.message);
         } finally {
             setLoading(false);
         }
     }
 
+    const inputCls = 'w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all';
+    const labelCls = 'block text-sm font-medium text-gray-300 mb-1.5';
+
     return (
-        <div className="min-h-screen bg-gradient-to-br from-green-900 via-green-800 to-gray-900 p-6">
+        <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-purple-950 to-gray-900 p-4 md:p-8">
             <div className="max-w-2xl mx-auto">
                 {/* Header */}
                 <div className="text-center mb-8">
-                    <h1 className="text-4xl font-bold text-white mb-2">Voter Registration</h1>
-                    <p className="text-green-300">VoteRakshak E-Voting System</p>
+                    <div className="inline-flex items-center gap-3 mb-4">
+                        <span className="text-4xl">🗳️</span>
+                        <h1 className="text-4xl font-extrabold text-white tracking-tight">VoteRakshak</h1>
+                    </div>
+                    <p className="text-indigo-300 text-lg font-medium">Student Voter Registration — Phase 2</p>
                 </div>
 
-                {/* Registration Form */}
-                <div className="bg-gray-800 rounded-2xl p-8 border border-green-600 shadow-2xl">
-                    <form onSubmit={handleRegister} className="space-y-6">
-                        {/* Name Fields */}
+                <div className="bg-gray-800/70 backdrop-blur-md rounded-2xl p-8 border border-indigo-700/50 shadow-2xl">
+                    <form onSubmit={handleRegister} className="space-y-5">
+
+                        {/* Name Row */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-2">
-                                    First Name *
-                                </label>
-                                <input
-                                    type="text"
+                                <label className={labelCls}>First Name *</label>
+                                <input type="text" className={inputCls} placeholder="First Name"
                                     value={form.firstName}
-                                    onChange={(e) => setForm({ ...form, firstName: e.target.value })}
-                                    className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500"
-                                    placeholder="First Name"
-                                    required
-                                />
+                                    onChange={e => setForm({ ...form, firstName: e.target.value })} required />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-2">
-                                    Middle Name
-                                </label>
-                                <input
-                                    type="text"
+                                <label className={labelCls}>Middle Name</label>
+                                <input type="text" className={inputCls} placeholder="Middle Name"
                                     value={form.middleName}
-                                    onChange={(e) => setForm({ ...form, middleName: e.target.value })}
-                                    className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500"
-                                    placeholder="Middle Name"
-                                />
+                                    onChange={e => setForm({ ...form, middleName: e.target.value })} />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-2">
-                                    Last Name *
-                                </label>
-                                <input
-                                    type="text"
+                                <label className={labelCls}>Last Name *</label>
+                                <input type="text" className={inputCls} placeholder="Last Name"
                                     value={form.lastName}
-                                    onChange={(e) => setForm({ ...form, lastName: e.target.value })}
-                                    className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500"
-                                    placeholder="Last Name"
-                                    required
-                                />
+                                    onChange={e => setForm({ ...form, lastName: e.target.value })} required />
                             </div>
                         </div>
 
-                        {/* Age and Aadhaar */}
+                        {/* Roll Number + Phone */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-2">
-                                    Age *
-                                </label>
-                                <input
-                                    type="number"
-                                    value={form.age}
-                                    onChange={(e) => setForm({ ...form, age: e.target.value })}
-                                    className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500"
-                                    placeholder="Age"
-                                    min="18"
-                                    required
-                                />
+                                <label className={labelCls}>Roll Number *</label>
+                                <input type="text" className={inputCls} placeholder="e.g. 23EC59"
+                                    value={form.rollNumber}
+                                    onChange={e => setForm({ ...form, rollNumber: e.target.value.toUpperCase() })}
+                                    required />
+                                <p className="text-xs text-gray-500 mt-1">Format: YYDEPTSRNO (e.g. 23CO12)</p>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-2">
-                                    Aadhaar Number *
-                                </label>
-                                <input
-                                    type="text"
-                                    value={form.aadhar}
-                                    onChange={(e) => setForm({ ...form, aadhar: e.target.value })}
-                                    className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500"
-                                    placeholder="12-digit Aadhaar"
-                                    pattern="[0-9]{12}"
-                                    maxLength="12"
-                                    required
-                                />
+                                <label className={labelCls}>Phone Number *</label>
+                                <input type="tel" className={inputCls} placeholder="10-digit mobile"
+                                    value={form.phone} pattern="[0-9]{10}" maxLength="10"
+                                    onChange={e => setForm({ ...form, phone: e.target.value })} required />
                             </div>
                         </div>
 
-                        {/* Phone */}
-                        <div>
-                            <label className="block text-sm font-medium text-gray-300 mb-2">
-                                Phone Number
-                            </label>
-                            <input
-                                type="tel"
-                                value={form.phone}
-                                onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                                className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500"
-                                placeholder="10-digit phone number"
-                                pattern="[0-9]{10}"
-                                maxLength="10"
-                            />
+                        {/* Department + Year */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className={labelCls}>Department *</label>
+                                <select className={inputCls} value={form.department}
+                                    onChange={e => setForm({ ...form, department: e.target.value })} required>
+                                    <option value="">Select Department</option>
+                                    {DEPARTMENTS.map(d => (
+                                        <option key={d.code} value={d.code}>{d.code} — {d.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className={labelCls}>Year *</label>
+                                <select className={inputCls} value={form.year}
+                                    onChange={e => setForm({ ...form, year: e.target.value })} required>
+                                    <option value="">Select Year</option>
+                                    <option value="1">1st Year</option>
+                                    <option value="2">2nd Year</option>
+                                    <option value="3">3rd Year</option>
+                                    <option value="4">4th Year</option>
+                                </select>
+                            </div>
                         </div>
 
-                        {/* Fingerprint Section */}
-                        <div className="border-t border-gray-700 pt-6">
-                            <h3 className="text-lg font-semibold text-white mb-4">Biometric Registration</h3>
-
-                            <div className="flex flex-col items-center space-y-4">
-                                <button
-                                    type="button"
-                                    onClick={captureFingerprint}
-                                    className="bg-green-600 hover:bg-green-500 text-white px-6 py-3 rounded-lg font-bold transition-colors"
-                                >
-                                    📷 Capture Fingerprint
-                                </button>
-
-                                {fpImage && (
-                                    <div className="bg-gray-700 p-4 rounded-lg border border-green-500">
-                                        <img
-                                            src={fpImage}
-                                            alt="Fingerprint"
-                                            className="mx-auto border-2 border-green-500 rounded"
-                                            width={150}
-                                            height={200}
-                                        />
-                                    </div>
+                        {/* Profile Image */}
+                        <div>
+                            <label className={labelCls}>Profile Image *</label>
+                            <div className="flex gap-3 items-start">
+                                <div className="flex-1 space-y-2">
+                                    <input type="file" accept="image/*" className="hidden" id="imageFileInput"
+                                        onChange={handleImageFile} />
+                                    <label htmlFor="imageFileInput"
+                                        className="block w-full text-center cursor-pointer px-4 py-2.5 bg-indigo-700 hover:bg-indigo-600 text-white rounded-lg text-sm font-medium transition-colors">
+                                        📂 Upload Photo
+                                    </label>
+                                    <p className="text-xs text-gray-500 text-center">— or paste a URL below —</p>
+                                    <input type="url" className={inputCls} placeholder="https://your-photo-url.com/photo.jpg"
+                                        value={form.imageUrl}
+                                        onChange={e => { setForm({ ...form, imageUrl: e.target.value }); setImagePreview(e.target.value); }} />
+                                </div>
+                                {imagePreview && (
+                                    <img src={imagePreview} alt="Preview"
+                                        className="w-24 h-24 rounded-lg border-2 border-indigo-500 object-cover flex-shrink-0" />
                                 )}
                             </div>
                         </div>
 
-                        {/* Status Message */}
+                        {/* Biometric Section */}
+                        <div className="border-t border-gray-700 pt-5">
+                            <h3 className="text-base font-semibold text-white mb-3">🔐 Biometric Registration</h3>
+                            <div className="flex flex-col items-center gap-4">
+                                <button type="button" onClick={captureFingerprint}
+                                    className="bg-green-700 hover:bg-green-600 text-white px-6 py-3 rounded-lg font-bold transition-colors flex items-center gap-2">
+                                    👆 Scan Fingerprint
+                                </button>
+                                {fpStatus && (
+                                    <p className={`text-sm ${fpStatus.includes('✅') ? 'text-green-400' : fpStatus.includes('❌') ? 'text-red-400' : 'text-blue-400'}`}>
+                                        {fpStatus}
+                                    </p>
+                                )}
+                                {fpImage && (
+                                    <img src={fpImage} alt="Fingerprint" className="border-2 border-green-500 rounded" width={130} height={180} />
+                                )}
+                                {!fingerprint && (
+                                    <p className="text-xs text-gray-500">Fingerprint is optional in development mode (FINGERPRINT_REQUIRED=false)</p>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Status */}
                         {status && (
-                            <div className={`p-4 rounded-lg border ${status.includes('✅')
-                                    ? 'bg-green-900/50 border-green-500 text-green-200'
-                                    : status.includes('❌')
-                                        ? 'bg-red-900/50 border-red-500 text-red-200'
-                                        : 'bg-blue-900/50 border-blue-500 text-blue-200'
-                                }`}>
+                            <div className={`p-4 rounded-lg border text-sm font-medium ${status.includes('✅') ? 'bg-green-900/40 border-green-600 text-green-300' : status.includes('❌') ? 'bg-red-900/40 border-red-600 text-red-300' : 'bg-blue-900/40 border-blue-600 text-blue-300'}`}>
                                 {status}
                             </div>
                         )}
 
-                        {/* Submit Button */}
-                        <div className="flex gap-4">
-                            <button
-                                type="button"
-                                onClick={() => navigate('/')}
-                                className="flex-1 bg-gray-600 hover:bg-gray-500 text-white py-3 px-6 rounded-lg font-bold transition-colors"
-                            >
+                        {/* Actions */}
+                        <div className="flex gap-4 pt-2">
+                            <button type="button" onClick={() => navigate('/')}
+                                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-3 px-6 rounded-lg font-bold transition-colors">
                                 Cancel
                             </button>
-                            <button
-                                type="submit"
-                                disabled={loading || !fingerprint}
-                                className="flex-1 bg-green-600 hover:bg-green-500 text-white py-3 px-6 rounded-lg font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
+                            <button type="submit" disabled={loading}
+                                className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 px-6 rounded-lg font-bold transition-colors">
                                 {loading ? 'Registering...' : 'Register'}
                             </button>
                         </div>
                     </form>
                 </div>
+
+                <p className="text-center text-gray-500 text-sm mt-4">
+                    Already registered?{' '}
+                    <button onClick={() => navigate('/profile')} className="text-indigo-400 hover:underline">View Profile</button>
+                </p>
             </div>
         </div>
     );
