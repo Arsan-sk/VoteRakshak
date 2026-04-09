@@ -18,6 +18,7 @@ function Profile() {
     const [unreadCount, setUnreadCount] = useState(0);
     const [notifOpen, setNotifOpen] = useState(false);
     const [electedPosition, setElectedPosition] = useState(null);
+    const [hasActiveElection, setHasActiveElection] = useState(false);
     const navigate = useNavigate();
     const socketRef = useRef(null);
 
@@ -29,6 +30,7 @@ function Profile() {
         if (!rollNumber) { navigate('/'); return; }
         loadProfile();
         if (studentId) loadNotifications();
+        checkActiveElection();
     }, [rollNumber, studentId]);
 
     // WebSocket — listen for election_started
@@ -42,10 +44,18 @@ function Profile() {
         socket.on('election_started', async () => {
             console.log('📬 Election started! Refreshing notifications...');
             await loadNotifications();
+            setHasActiveElection(true);
+        });
+
+        socket.on('election_ended', async () => {
+            console.log('📬 Election ended! Refreshing notifications...');
+            await loadNotifications();
+            setHasActiveElection(false);
+            if (voter) loadElectedPositions();
         });
 
         return () => socket.disconnect();
-    }, [studentId]);
+    }, [studentId, voter]);
 
     async function loadProfile() {
         try {
@@ -59,6 +69,14 @@ function Profile() {
         } finally {
             setLoading(false);
         }
+    }
+
+    async function checkActiveElection() {
+        try {
+            const res = await fetch(`${BACKEND_URL}/api/public/active-election`);
+            const data = await res.json();
+            setHasActiveElection(!!data.election);
+        } catch {}
     }
 
     async function loadNotifications() {
@@ -105,6 +123,7 @@ function Profile() {
         localStorage.removeItem('voterToken');
         localStorage.removeItem('voterRollNumber');
         localStorage.removeItem('voterId');
+        localStorage.removeItem('voterName');
         navigate('/');
     }
 
@@ -227,12 +246,20 @@ function Profile() {
                                 ))}
                             </div>
 
-                            {/* Booth info */}
-                            {voter.boothAddress && (
+                            {/* Booth info — only show when election is active */}
+                            {voter.boothAddress && hasActiveElection && (
                                 <div className="bg-indigo-900/30 border border-indigo-700/50 rounded-xl p-4">
-                                    <p className="text-xs text-indigo-400 mb-1 font-medium uppercase tracking-wide">Your Assigned Polling Booth</p>
+                                    <p className="text-xs text-indigo-400 mb-1 font-medium uppercase tracking-wide">Your Assigned Polling Booth — Election Active</p>
                                     <p className="text-white font-semibold">{voter.boothName || voter.boothId}</p>
                                     <p className="text-indigo-300 text-sm mt-0.5">📍 {voter.boothAddress}</p>
+                                </div>
+                            )}
+                            {voter.boothAddress && !hasActiveElection && (
+                                <div className="bg-gray-700/30 border border-gray-600/50 rounded-xl p-4">
+                                    <p className="text-xs text-gray-500 mb-1 font-medium uppercase tracking-wide">Your Assigned Polling Booth</p>
+                                    <p className="text-gray-400 font-semibold">{voter.boothName || voter.boothId}</p>
+                                    <p className="text-gray-500 text-sm mt-0.5">📍 {voter.boothAddress}</p>
+                                    <p className="text-gray-600 text-xs mt-1">No election is currently active</p>
                                 </div>
                             )}
                         </div>

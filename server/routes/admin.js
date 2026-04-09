@@ -25,6 +25,8 @@ import {
     getVotesByElection,
     createNotifications,
     recordElectedPosition,
+    getElectedPositions,
+    getElectedPositionsHistory,
     getDashboardStats,
     getBoothByDept,
     getBooths,
@@ -440,24 +442,62 @@ router.post('/elections/:id/end', async (req, res) => {
             });
         }
 
-        // Emit WebSocket event
+        // ── Election-end notifications for all eligible voters ──
+        const ELECTION_TYPE_LABELS = { ER: 'Engineering Representative', DR: 'Department Representative', CR: 'Class Representative' };
+        const electionLabel = ELECTION_TYPE_LABELS[election.election_type] || election.election_type;
+
+        // Find winner name
+        let winnerName = 'N/A';
+        const winnerCandidate = candidates.find(c => c.student_id === winnerId);
+        if (winnerCandidate) {
+            winnerName = `${winnerCandidate.students.first_name} ${winnerCandidate.students.last_name}`;
+        }
+
+        // Get eligible students for notifications
+        let endNotifQuery = { limit: 10000 };
+        if (election.election_type === 'DR') endNotifQuery.dept = election.department;
+        if (election.election_type === 'CR') { endNotifQuery.dept = election.department; endNotifQuery.year = String(election.year); }
+        const { students: notifStudents } = await getAllStudents(endNotifQuery);
+
+        const endNotifRows = notifStudents.map(student => ({
+            student_id: student.id,
+            election_id: id,
+            title: `${electionLabel} Election — Results Declared`,
+            message: `The ${electionLabel} election has ended. Winner: ${winnerName}${election.department ? ` (${election.department} Dept)` : ''}. Thank you for participating!`,
+            is_read: false,
+        }));
+
+        if (endNotifRows.length > 0) {
+            try {
+                await createNotifications(endNotifRows);
+                console.log(`📬 Election-end notifications sent to ${endNotifRows.length} students`);
+            } catch (notifErr) {
+                console.warn('⚠️ End-election notification creation failed:', notifErr.message);
+            }
+        }
+
+        // Emit WebSocket event (enriched with winner details)
         const io = req.app.get('io');
         if (io) {
             io.emit('election_ended', {
                 electionId: id,
                 winnerId,
+                winnerName,
                 electionType: election.election_type,
+                department: election.department || null,
             });
         }
 
-        console.log(`✅ Election ${id} ended. Winner: ${winnerId} (${maxVotes} votes)`);
+        console.log(`✅ Election ${id} ended. Winner: ${winnerName} (${maxVotes} votes)`);
 
         res.json({
             success: true,
             message: 'Election ended and winner declared',
             election: updatedElection,
             winnerId,
+            winnerName,
             totalVotes: maxVotes,
+            notifiedStudents: endNotifRows.length,
         });
     } catch (error) {
         console.error('❌ End election error:', error);
@@ -504,6 +544,23 @@ router.get('/results/live/:electionId', async (req, res) => {
     } catch (error) {
         console.error('❌ Live results error:', error);
         res.status(500).json({ error: 'Failed to get live results', message: error.message });
+    }
+});
+
+// ─── REPRESENTATIVES ────────────────────────────────────────────
+
+/**
+ * GET /api/admin/representatives
+ * Returns current + past elected representatives
+ */
+router.get('/representatives', async (req, res) => {
+    try {
+        const current = await getElectedPositions();
+        const history = await getElectedPositionsHistory();
+        res.json({ success: true, current, history });
+    } catch (error) {
+        console.error('❌ Representatives error:', error);
+        res.status(500).json({ error: 'Failed to get representatives', message: error.message });
     }
 });
 

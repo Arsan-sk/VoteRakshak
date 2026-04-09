@@ -38,6 +38,7 @@ function LoginPage() {
             localStorage.setItem('voterToken', data.token);
             localStorage.setItem('voterRollNumber', data.user.rollNumber);
             localStorage.setItem('voterId', data.user.id);
+            localStorage.setItem('voterName', data.user.name || data.user.rollNumber);
 
             navigate('/profile');
         } catch (err) {

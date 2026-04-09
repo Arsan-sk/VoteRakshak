@@ -5,6 +5,7 @@ import Students from './pages/Students';
 import Elections from './pages/Elections';
 import BLOManagement from './pages/BLOManagement';
 import Results from './pages/Results';
+import Representatives from './pages/Representatives';
 import Layout from './components/Layout';
 
 function ProtectedRoute({ children }) {
@@ -23,6 +24,7 @@ function App() {
                     <Route path="elections" element={<Elections />} />
                     <Route path="blos" element={<BLOManagement />} />
                     <Route path="results" element={<Results />} />
+                    <Route path="representatives" element={<Representatives />} />
                 </Route>
                 <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

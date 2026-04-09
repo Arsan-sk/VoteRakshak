@@ -1,6 +1,8 @@
 /**
  * Landing Page / Home — Phase 2
- * Dynamic: shows active election, provisional live counts, declared results, elected representatives
+ * Auth-aware: if logged in, shows "Welcome back" hero with Profile/Logout
+ * If not logged in, shows Register/Login buttons
+ * Public data (active election, results, reps, features) always visible
  */
 
 import { useState, useEffect } from 'react';
@@ -22,6 +24,11 @@ function Home() {
     const [electedPositions, setElectedPositions] = useState([]);
     const [loading, setLoading] = useState(true);
 
+    // Auth state
+    const isLoggedIn = !!localStorage.getItem('voterToken');
+    const voterName = localStorage.getItem('voterName') || '';
+    const voterRoll = localStorage.getItem('voterRollNumber') || '';
+
     useEffect(() => {
         Promise.all([
             fetch(`${BACKEND_URL}/api/public/active-election`).then(r => r.json()),
@@ -33,6 +40,14 @@ function Home() {
             setElectedPositions(positionsData.positions || []);
         }).catch(() => {}).finally(() => setLoading(false));
     }, []);
+
+    function handleLogout() {
+        localStorage.removeItem('voterToken');
+        localStorage.removeItem('voterRollNumber');
+        localStorage.removeItem('voterId');
+        localStorage.removeItem('voterName');
+        window.location.reload();
+    }
 
     const maxVotes = candidates.length > 0 ? Math.max(...candidates.map(c => c.voteCount), 1) : 1;
 
@@ -47,16 +62,37 @@ function Home() {
                 </div>
                 <p className="text-xl text-purple-300 mb-2 font-medium">College Election Management System</p>
                 <p className="text-gray-400 mb-8">Blockchain-Secured · Biometric-Protected · Transparent</p>
-                <div className="flex justify-center gap-4 flex-wrap">
-                    <button onClick={() => navigate('/register')}
-                        className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3.5 rounded-xl font-bold text-lg transition-all shadow-lg hover:shadow-indigo-500/30 hover:-translate-y-0.5">
-                        📝 Register to Vote
-                    </button>
-                    <button onClick={() => navigate('/login')}
-                        className="bg-gray-700 hover:bg-gray-600 text-white px-8 py-3.5 rounded-xl font-bold text-lg transition-all shadow-lg">
-                        🔐 Login
-                    </button>
-                </div>
+
+                {isLoggedIn ? (
+                    /* ── Authenticated Hero ── */
+                    <div className="max-w-lg mx-auto bg-gray-800/60 backdrop-blur-md border border-indigo-600/50 rounded-2xl p-6 shadow-xl">
+                        <p className="text-indigo-300 text-sm mb-1">Logged in as</p>
+                        <p className="text-2xl font-bold text-white mb-1">{voterName || voterRoll}</p>
+                        {voterName && <p className="text-gray-400 text-sm mb-5">{voterRoll}</p>}
+                        <div className="flex justify-center gap-3 flex-wrap">
+                            <button onClick={() => navigate('/profile')}
+                                className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-xl font-bold transition-all shadow-lg hover:shadow-indigo-500/30 hover:-translate-y-0.5">
+                                👤 My Profile
+                            </button>
+                            <button onClick={handleLogout}
+                                className="bg-red-700/80 hover:bg-red-600 text-white px-6 py-3 rounded-xl font-bold transition-all">
+                                🔓 Logout
+                            </button>
+                        </div>
+                    </div>
+                ) : (
+                    /* ── Guest Hero ── */
+                    <div className="flex justify-center gap-4 flex-wrap">
+                        <button onClick={() => navigate('/register')}
+                            className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3.5 rounded-xl font-bold text-lg transition-all shadow-lg hover:shadow-indigo-500/30 hover:-translate-y-0.5">
+                            📝 Register to Vote
+                        </button>
+                        <button onClick={() => navigate('/login')}
+                            className="bg-gray-700 hover:bg-gray-600 text-white px-8 py-3.5 rounded-xl font-bold text-lg transition-all shadow-lg">
+                            🔐 Login
+                        </button>
+                    </div>
+                )}
             </section>
 
             {/* Active Election Panel */}

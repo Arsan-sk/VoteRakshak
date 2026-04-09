@@ -413,6 +413,15 @@ export async function clearElectedPosition(studentId) {
     if (error) throw error;
 }
 
+export async function getElectedPositionsHistory() {
+    const { data, error } = await supabase
+        .from('elected_positions')
+        .select('*, students(first_name, last_name, roll_number, department, year, image_url), elections(election_type, department, year, status, ended_at)')
+        .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data;
+}
+
 // ─── DASHBOARD STATS ─────────────────────────────────────────
 
 export async function getDashboardStats() {

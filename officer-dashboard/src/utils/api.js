@@ -49,6 +49,22 @@ export async function unlockBooth(boothId, voterRollNumber, voterName, voterPhot
     return response.data;
 }
 
+/** Verify voter identity via PIN or fingerprint (biometric_mode flag) */
+export async function verifyVoterIdentity(rollNumber, { pin, fingerprintTemplate } = {}) {
+    const response = await api.post('/officer/verify-identity', {
+        rollNumber,
+        pin: pin || undefined,
+        fingerprintTemplate: fingerprintTemplate || undefined,
+    });
+    return response.data;
+}
+
+/** Get system flags (public, no auth) */
+export async function getFlags() {
+    const response = await axios.get(`${baseUrl}/api/public/flags`);
+    return response.data;
+}
+
 /** Reset booth */
 export async function resetBooth(boothId) {
     const response = await api.post('/officer/reset-booth', { boothId });
@@ -85,4 +101,4 @@ export async function getActiveElection() {
     return response.data;
 }
 
-export default { login, searchVoterByRollNumber, getVoter, unlockBooth, resetBooth, getAuditLogs, getStats, getBooths, getActiveBooths, getActiveElection };
+export default { login, searchVoterByRollNumber, getVoter, unlockBooth, verifyVoterIdentity, getFlags, resetBooth, getAuditLogs, getStats, getBooths, getActiveBooths, getActiveElection };

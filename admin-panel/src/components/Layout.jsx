@@ -10,6 +10,7 @@ const NAV_ITEMS = [
     { to: '/admin/students', icon: '👥', label: 'Students' },
     { to: '/admin/blos', icon: '🏢', label: 'BLO Management' },
     { to: '/admin/results', icon: '🏆', label: 'Results' },
+    { to: '/admin/representatives', icon: '🏛️', label: 'Representatives' },
 ];
 
 function Layout() {

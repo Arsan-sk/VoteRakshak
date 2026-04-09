@@ -69,6 +69,120 @@ router.get('/search-voter', authenticateToken, async (req, res) => {
     }
 });
 
+// ─── VERIFY IDENTITY ──────────────────────────────────────────
+
+/**
+ * POST /api/officer/verify-identity
+ * Verify voter identity (PIN or fingerprint based on biometric_mode flag)
+ * Body: { rollNumber, pin? | fingerprintTemplate? }
+ * Returns { verified: true/false, hasVoted: true/false }
+ */
+router.post('/verify-identity', authenticateToken, async (req, res) => {
+    try {
+        const { rollNumber, pin, fingerprintTemplate } = req.body;
+        if (!rollNumber) {
+            return res.status(400).json({ error: 'rollNumber required' });
+        }
+
+        const student = await getStudentByRollNumber(rollNumber.toUpperCase());
+        if (!student) {
+            return res.status(404).json({ error: 'Student not found' });
+        }
+
+        const biometricMode = await getFlag('biometric_mode');
+
+        if (biometricMode) {
+            // ── FINGERPRINT MODE ──
+            if (!fingerprintTemplate) {
+                return res.status(400).json({ error: 'Fingerprint scan required (biometric_mode=true)' });
+            }
+            // Import verifyFingerprint dynamically
+            const { verifyFingerprint } = await import('../utils/biometric.js');
+            if (!student.fingerprint_id) {
+                return res.status(400).json({ error: 'Student has no fingerprint on file. Cannot verify.' });
+            }
+            const verification = await verifyFingerprint(student.fingerprint_id, fingerprintTemplate);
+            if (!verification.verified) {
+                await addAuditLog({
+                    event_type: 'IDENTITY_VERIFY_FAILED',
+                    blo_id: req.user.userId,
+                    booth_id: req.user.boothId,
+                    student_id: student.id,
+                    details: { method: 'fingerprint', score: verification.score },
+                }).catch(() => {});
+                return res.status(401).json({ error: 'Fingerprint verification failed', verified: false, score: verification.score });
+            }
+        } else {
+            // ── PIN MODE ──
+            if (!pin) {
+                return res.status(400).json({ error: 'PIN required for identity verification' });
+            }
+            if (!/^\d{4}$/.test(String(pin))) {
+                return res.status(400).json({ error: 'PIN must be 4 digits' });
+            }
+
+            const { default: bcrypt } = await import('bcryptjs');
+            if (!student.pin_hash) {
+                // Legacy fallback
+                if (String(pin) !== '1234') {
+                    await addAuditLog({
+                        event_type: 'IDENTITY_VERIFY_FAILED',
+                        blo_id: req.user.userId,
+                        booth_id: req.user.boothId,
+                        student_id: student.id,
+                        details: { method: 'pin', reason: 'wrong_pin_legacy' },
+                    }).catch(() => {});
+                    return res.status(401).json({ error: 'Incorrect PIN', verified: false });
+                }
+            } else {
+                const pinMatch = await bcrypt.compare(String(pin), student.pin_hash);
+                if (!pinMatch) {
+                    await addAuditLog({
+                        event_type: 'IDENTITY_VERIFY_FAILED',
+                        blo_id: req.user.userId,
+                        booth_id: req.user.boothId,
+                        student_id: student.id,
+                        details: { method: 'pin', reason: 'wrong_pin' },
+                    }).catch(() => {});
+                    return res.status(401).json({ error: 'Incorrect PIN', verified: false });
+                }
+            }
+        }
+
+        // Check if already voted
+        const activeElection = await getActiveElection();
+        let hasVoted = false;
+        if (activeElection) {
+            hasVoted = await hasStudentVoted(activeElection.id, student.id);
+        }
+
+        await addAuditLog({
+            event_type: 'IDENTITY_VERIFIED',
+            blo_id: req.user.userId,
+            booth_id: req.user.boothId,
+            student_id: student.id,
+            details: { method: biometricMode ? 'fingerprint' : 'pin', hasVoted },
+        }).catch(() => {});
+
+        res.json({
+            success: true,
+            verified: true,
+            hasVoted,
+            voter: {
+                id: student.id,
+                fullName: `${student.first_name} ${student.middle_name || ''} ${student.last_name}`.trim(),
+                rollNumber: student.roll_number,
+                department: student.department,
+                voterHash: student.voter_hash,
+                imageUrl: student.image_url,
+            },
+        });
+    } catch (error) {
+        console.error('❌ Verify identity error:', error);
+        res.status(500).json({ error: 'Verification failed', message: error.message });
+    }
+});
+
 // ─── UNLOCK BOOTH ─────────────────────────────────────────────
 
 /**
