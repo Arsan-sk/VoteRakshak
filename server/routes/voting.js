@@ -1,191 +1,288 @@
 /**
- * Voting Routes
- * Handles vote casting and voter information retrieval
+ * Voting Routes — Phase 2
+ * Election-scoped vote casting, notifications, active election endpoint
  */
 
 import express from 'express';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { authenticateToken } from './auth.js';
 import { verifyFingerprint } from '../utils/biometric.js';
-import { castVote as blockchainCastVote, hasVoted, hashAadhaar } from '../utils/blockchain.js';
+import {
+    castVote as blockchainCastVote,
+    checkIfVoted,
+    hashRollNumber,
+} from '../utils/blockchain.js';
+import {
+    getStudentByRollNumber,
+    getStudentByVoterHash,
+    getActiveElection,
+    getCandidatesByElection,
+    getCandidateById,
+    recordVote,
+    hasStudentVoted,
+    incrementCandidateVoteCount,
+    getStudentNotifications,
+    markNotificationRead,
+    getUnreadNotificationCount,
+    addAuditLog,
+} from '../utils/supabaseClient.js';
+import { getFlag } from '../utils/flagsManager.js';
 
 const router = express.Router();
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
-const USERS_DB_PATH = path.join(__dirname, '..', 'data', 'users.json');
-const BOOTHS_DB_PATH = path.join(__dirname, '..', 'data', 'booths.json');
+// ─── ACTIVE ELECTION ──────────────────────────────────────────
 
-// =================== Helper Functions ===================
-
-function readUsers() {
+/**
+ * GET /api/voting/active-election
+ * Returns current active election with dynamic candidate list
+ * No auth required (booths and voter portal both use this)
+ */
+router.get('/active-election', async (req, res) => {
     try {
-        if (!fs.existsSync(USERS_DB_PATH)) {
-            return [];
+        const election = await getActiveElection();
+
+        if (!election) {
+            return res.json({ success: true, election: null, candidates: [] });
         }
-        return JSON.parse(fs.readFileSync(USERS_DB_PATH, 'utf8'));
-    } catch (err) {
-        console.error('❌ Failed to read local users:', err.message);
-        return [];
+
+        const candidates = await getCandidatesByElection(election.id);
+
+        const candidateList = candidates.map(c => ({
+            id: c.id,
+            serialNo: c.serial_no,
+            name: `${c.students.first_name} ${c.students.last_name}`,
+            firstName: c.students.first_name,
+            lastName: c.students.last_name,
+            department: c.students.department,
+            year: c.students.year,
+            imageUrl: c.students.image_url || 'https://via.placeholder.com/150',
+            voteCount: c.vote_count,
+        }));
+
+        res.json({
+            success: true,
+            election: {
+                id: election.id,
+                blockchainElectionId: election.blockchain_election_id,
+                type: election.election_type,
+                department: election.department || null,
+                year: election.year || null,
+                status: election.status,
+                endsAt: election.ends_at,
+            },
+            candidates: candidateList,
+        });
+    } catch (error) {
+        console.error('❌ Get active election error:', error);
+        res.status(500).json({ error: 'Failed to get active election', message: error.message });
     }
-}
+});
 
-function writeUsers(users) {
+// ─── VOTER PROFILE ────────────────────────────────────────────
+
+/**
+ * GET /api/voting/voter/:rollNumber
+ * Get student profile, booth info, voted elections
+ */
+router.get('/voter/:rollNumber', async (req, res) => {
     try {
-        fs.writeFileSync(USERS_DB_PATH, JSON.stringify(users, null, 2));
-    } catch (err) {
-        console.error('❌ Failed to write local users (likely read-only FS):', err.message);
-    }
-}
+        const { rollNumber } = req.params;
+        const student = await getStudentByRollNumber(rollNumber.toUpperCase());
 
-function readBooths() {
-    try {
-        if (!fs.existsSync(BOOTHS_DB_PATH)) {
-            // Create default booths data
-            const defaultBooths = [
-                {
-                    id: 'BOOTH_001',
-                    name: 'Central Polling Station',
-                    address: '123 Main Street, Mumbai, Maharashtra',
-                    coordinates: { lat: 19.0760, lng: 72.8777 },
-                },
-                {
-                    id: 'BOOTH_002',
-                    name: 'North District Center',
-                    address: '456 Park Avenue, Mumbai, Maharashtra',
-                    coordinates: { lat: 19.1136, lng: 72.8697 },
-                },
-                {
-                    id: 'BOOTH_003',
-                    name: 'South Community Hall',
-                    address: '789 Beach Road, Mumbai, Maharashtra',
-                    coordinates: { lat: 18.9220, lng: 72.8347 },
-                },
-            ];
-
-            try {
-                fs.mkdirSync(path.dirname(BOOTHS_DB_PATH), { recursive: true });
-                fs.writeFileSync(BOOTHS_DB_PATH, JSON.stringify(defaultBooths, null, 2));
-            } catch (err) {
-                console.warn('⚠️ Cannot create local booths file. Using default booths in memory.');
-                return defaultBooths;
-            }
-            return defaultBooths;
+        if (!student) {
+            return res.status(404).json({ error: 'Voter not found' });
         }
-        return JSON.parse(fs.readFileSync(BOOTHS_DB_PATH, 'utf8'));
-    } catch (err) {
-        console.error('❌ Failed to read local booths:', err.message);
-        // Return defaults on error so the app doesn't crash
-        return [
-            {
-                id: 'BOOTH_001',
-                name: 'Central Polling Station',
-                address: '123 Main Street, Mumbai, Maharashtra',
-                coordinates: { lat: 19.0760, lng: 72.8777 },
-            }
-        ];
+
+        // Get unread notification count
+        const unreadCount = await getUnreadNotificationCount(student.id);
+
+        res.json({
+            success: true,
+            voter: {
+                id: student.id,
+                name: {
+                    first: student.first_name,
+                    middle: student.middle_name,
+                    last: student.last_name,
+                },
+                fullName: `${student.first_name} ${student.middle_name || ''} ${student.last_name}`.trim(),
+                rollNumber: student.roll_number,
+                phone: student.phone,
+                department: student.department,
+                year: student.year,
+                imageUrl: student.image_url,
+                boothId: student.booth_id,
+                boothName: student.booths?.name,
+                boothAddress: student.booths?.address,
+                registeredAt: student.created_at,
+            },
+            unreadNotifications: unreadCount,
+        });
+    } catch (error) {
+        console.error('❌ Get voter error:', error);
+        res.status(500).json({ error: 'Failed to get voter', message: error.message });
     }
-}
+});
 
-
-
-// =================== Routes ===================
+// ─── VOTE CASTING ─────────────────────────────────────────────
 
 /**
  * POST /api/voting/cast
- * Cast a vote on the blockchain
+ * Cast a vote in the active election
+ * Body: { electionId, candidateId, voterHash, fingerprintTemplate }
  */
 router.post('/cast', async (req, res) => {
     try {
-        const { aadhar, partyId, fingerprintTemplate } = req.body;
+        const { electionId, candidateId, voterHash, fingerprintTemplate } = req.body;
 
-        // Validate inputs
-        if (!aadhar || !partyId || !fingerprintTemplate) {
+        if (!electionId || !candidateId || !voterHash) {
             return res.status(400).json({
-                error: 'Missing required fields: aadhar, partyId, fingerprintTemplate',
+                error: 'Missing required fields: electionId, candidateId, voterHash',
             });
         }
 
-        // Validate party ID
-        if (partyId < 1 || partyId > 10) {
-            return res.status(400).json({
-                error: 'Invalid party ID',
-            });
+        // Verify election is still active
+        const election = await getActiveElection();
+        if (!election || election.id !== electionId) {
+            return res.status(409).json({ error: 'No active election matching the provided ID' });
         }
 
-        // Find user
-        const aadharHash = hashAadhaar(aadhar);
+        // Find student by voterHash
+        const student = await getStudentByVoterHash(voterHash);
+        if (!student) {
+            return res.status(404).json({ error: 'Voter not found' });
+        }
 
-        // Try Supabase first, then fall back to local JSON
-        let user = null;
+        // DR/CR scoping checks
+        if (election.election_type === 'DR') {
+            if (student.department !== election.department) {
+                return res.status(403).json({
+                    error: `This is a ${election.department} department election. You are registered in ${student.department}.`,
+                });
+            }
+        }
+        if (election.election_type === 'CR') {
+            if (student.department !== election.department) {
+                return res.status(403).json({
+                    error: `This election is for ${election.department} department only.`,
+                });
+            }
+            if (String(student.year) !== String(election.year)) {
+                return res.status(403).json({
+                    error: `This election is for Year ${election.year} only. You are in Year ${student.year}.`,
+                });
+            }
+        }
+
+        // Check double-vote in DB
+        const alreadyVotedDB = await hasStudentVoted(electionId, student.id);
+        if (alreadyVotedDB) {
+            return res.status(403).json({ error: 'You have already voted in this election' });
+        }
+
+        // Check double-vote on blockchain
         try {
-            user = await (await import('../utils/supabaseClient.js')).getUserByAadharHash(aadharHash);
-            if (!user) {
-                user = await (await import('../utils/supabaseClient.js')).getUserByRawAadhaar(aadhar);
+            const alreadyVotedChain = await checkIfVoted(election.blockchain_election_id, voterHash);
+            if (alreadyVotedChain) {
+                return res.status(403).json({ error: 'Vote already recorded on blockchain' });
             }
-        } catch (err) {
-            console.error('❌ Supabase lookup failed, falling back to local JSON:', err.message);
+        } catch (chainErr) {
+            console.warn('⚠️ Blockchain double-vote check failed (continuing):', chainErr.message);
         }
 
-        if (!user) {
-            const users = readUsers();
-            // Try to find by hashed Aadhaar first, then fall back to raw Aadhaar (test/dev only)
-            let userIndex = users.findIndex(u => u.aadharHash === aadharHash);
-            if (userIndex === -1) {
-                userIndex = users.findIndex(u => u.rawAadhaar === aadhar);
+        // Get candidate details
+        const candidate = await getCandidateById(candidateId);
+        if (!candidate || candidate.election_id !== electionId) {
+            return res.status(400).json({ error: 'Invalid candidate for this election' });
+        }
+
+        // ── Identity Verification (mode-aware) ──────────────────────
+        const biometricMode = await getFlag('biometric_mode');
+
+        if (biometricMode) {
+            // FINGERPRINT mode
+            if (student.fingerprint_id) {
+                if (!fingerprintTemplate) {
+                    return res.status(400).json({ error: 'Fingerprint scan required to cast vote' });
+                }
+                const verification = await verifyFingerprint(student.fingerprint_id, fingerprintTemplate);
+                if (!verification.verified) {
+                    return res.status(401).json({
+                        error: 'Fingerprint verification failed',
+                        score: verification.score,
+                        wrongAuth: true,
+                    });
+                }
             }
-
-            if (userIndex === -1) {
-                return res.status(404).json({ error: 'Voter not found' });
+        } else {
+            // PIN mode — pin comes in req.body
+            const { pin } = req.body;
+            if (!pin) {
+                return res.status(400).json({ error: 'PIN required to cast vote (BIOMETRIC_MODE=false)', wrongAuth: true });
             }
-
-            user = users[userIndex];
+            if (!/^\d{4}$/.test(String(pin))) {
+                return res.status(400).json({ error: 'PIN must be 4 digits', wrongAuth: true });
+            }
+            if (!student.pin_hash) {
+                // Legacy: accept '1234' as default when no hash set
+                if (String(pin) !== '1234') {
+                    return res.status(401).json({ error: 'Incorrect PIN. Try again.', wrongAuth: true });
+                }
+            } else {
+                const { default: bcrypt } = await import('bcryptjs');
+                const pinMatch = await bcrypt.compare(String(pin), student.pin_hash);
+                if (!pinMatch) {
+                    return res.status(401).json({ error: 'Incorrect PIN. Try again.', wrongAuth: true });
+                }
+            }
         }
-
-        // Check if already voted (blockchain check)
-        const alreadyVoted = await hasVoted(aadharHash);
-        if (alreadyVoted) {
-            return res.status(403).json({
-                error: 'Voter has already cast their vote',
-            });
-        }
-
-        // Verify fingerprint
-        console.log(`🔍 Verifying fingerprint for voter: ${user.id}`);
-        const verificationResult = await verifyFingerprint(
-            user.biometric.templateId,
-            fingerprintTemplate,
-            user.biometric.template
-        );
-
-        if (!verificationResult.verified) {
-            return res.status(401).json({
-                error: 'Fingerprint verification failed',
-                score: verificationResult.score,
-            });
-        }
-
-        console.log(`✅ Fingerprint verified (Score: ${verificationResult.score})`);
 
         // Cast vote on blockchain
-        const txResult = await blockchainCastVote(aadharHash, partyId);
-
-        // Update user's voted status
+        let txResult = { transactionHash: `DEV_${Date.now()}`, blockNumber: 0 };
         try {
-            await (await import('../utils/supabaseClient.js')).markUserVoted(aadharHash);
-            console.log('✅ Marked user as voted in Supabase');
-        } catch (err) {
-            console.error('❌ Failed to update Supabase status, falling back to local file:', err.message);
-            if (userIndex !== -1) {
-                users[userIndex].hasVoted = true;
-                users[userIndex].votedAt = new Date().toISOString();
-                writeUsers(users);
-            }
+            txResult = await blockchainCastVote(
+                election.blockchain_election_id,
+                voterHash,
+                candidate.serial_no
+            );
+        } catch (chainErr) {
+            console.warn('⚠️ Blockchain castVote failed (dev mode, continuing):', chainErr.message);
         }
 
-        console.log(`🗳️  Vote cast successfully: ${user.id} -> Party ${partyId}`);
+        // Record vote in DB
+        await recordVote({
+            election_id: electionId,
+            student_id: student.id,
+            candidate_id: candidateId,
+            tx_hash: txResult.transactionHash,
+            block_number: txResult.blockNumber,
+        });
+
+        // Increment candidate vote count in DB
+        await incrementCandidateVoteCount(candidateId);
+
+        // Emit live vote update to admin panel
+        const io = req.app.get('io');
+        if (io) {
+            io.emit('live_vote_update', {
+                electionId,
+                candidateId,
+                studentDept: student.department,
+            });
+        }
+
+        // Audit log
+        await addAuditLog({
+            event_type: 'VOTE_CAST',
+            student_id: student.id,
+            election_id: electionId,
+            details: {
+                candidateId,
+                txHash: txResult.transactionHash,
+                blockNumber: txResult.blockNumber,
+            },
+        }).catch(err => console.warn('Audit log failed:', err.message));
+
+        console.log(`✅ Vote cast: ${student.roll_number} → candidate ${candidate.serial_no} (${election.election_type})`);
 
         res.json({
             success: true,
@@ -195,135 +292,55 @@ router.post('/cast', async (req, res) => {
         });
     } catch (error) {
         console.error('❌ Vote casting error:', error);
-        res.status(500).json({
-            error: 'Failed to cast vote',
-            message: error.message,
-        });
+        res.status(500).json({ error: 'Failed to cast vote', message: error.message });
     }
 });
 
+// ─── NOTIFICATIONS ────────────────────────────────────────────
+
 /**
- * GET /api/voting/voter/:aadhar
- * Get voter information and voting status
+ * GET /api/voting/notifications/:studentId
+ * Returns all notifications for a student
  */
-router.get('/voter/:aadhar', async (req, res) => {
+router.get('/notifications/:studentId', authenticateToken, async (req, res) => {
     try {
-        const { aadhar } = req.params;
+        const { studentId } = req.params;
+        const { unreadOnly } = req.query;
 
-        if (!aadhar || !/^\d{12}$/.test(aadhar)) {
-            return res.status(400).json({
-                error: 'Invalid Aadhaar number',
-            });
-        }
-
-        const users = readUsers();
-        const aadharHash = hashAadhaar(aadhar);
-        let user = users.find(u => u.aadharHash === aadharHash);
-
-        // Check blockchain for voting status (Fail-safe)
-        let votedOnChain = false;
-        try {
-            votedOnChain = await hasVoted(aadharHash);
-        } catch (chainErr) {
-            console.warn('⚠️ Blockchain check failed (likely not connected). Treating as not voted on chain.', chainErr.message);
-            // Non-blocking: proceed with database data only
-        }
-
-        // Try to get user from Supabase first
-        try {
-            let sbUser = await (await import('../utils/supabaseClient.js')).getUserByAadharHash(aadharHash);
-
-            // If not found by hash, try raw Aadhaar (handling Salt mismatches)
-            if (!sbUser) {
-                console.log('⚠️ Voter not found by hash, trying raw Aadhaar...');
-                sbUser = await (await import('../utils/supabaseClient.js')).getUserByRawAadhaar(aadhar);
-            }
-
-            if (sbUser) {
-                return res.json({
-                    success: true,
-                    voter: {
-                        id: sbUser.id,
-                        name: {
-                            first: sbUser.name_first,
-                            middle: sbUser.name_middle,
-                            last: sbUser.name_last,
-                        },
-                        fullName: `${sbUser.name_first} ${sbUser.name_middle || ''} ${sbUser.name_last}`.trim(),
-                        age: sbUser.age,
-                        phone: sbUser.phone,
-                        photo: sbUser.photo,
-                        hasVoted: votedOnChain || sbUser.has_voted,
-                        registeredAt: sbUser.registered_at,
-                        votedAt: sbUser.voted_at || null,
-                    },
-                });
-            }
-        } catch (err) {
-            console.warn('Supabase fetch failed (voter lookup), using local fallback:', err.message);
-        }
-
-        if (!user) {
-            return res.status(404).json({
-                error: 'Voter not found',
-            });
-        }
-
-        res.json({
-            success: true,
-            voter: {
-                id: user.id,
-                name: {
-                    first: user.name.first,
-                    middle: user.name.middle,
-                    last: user.name.last,
-                },
-                fullName: `${user.name.first} ${user.name.middle} ${user.name.last}`.trim(),
-                age: user.age,
-                phone: user.phone,
-                photo: user.photo,
-                hasVoted: votedOnChain || user.hasVoted,
-                registeredAt: user.registeredAt,
-                votedAt: user.votedAt || null,
-            },
+        const notifications = await getStudentNotifications(studentId, {
+            unreadOnly: unreadOnly === 'true',
         });
+
+        res.json({ success: true, notifications });
     } catch (error) {
-        console.error('❌ Error fetching voter:', error);
-        res.status(500).json({
-            error: 'Failed to fetch voter information',
-            message: error.message,
-        });
+        console.error('❌ Get notifications error:', error);
+        res.status(500).json({ error: 'Failed to get notifications', message: error.message });
     }
 });
 
 /**
- * GET /api/voting/booths
- * Get list of polling booths
+ * PATCH /api/voting/notifications/:id/read
+ * Mark a notification as read
  */
+router.patch('/notifications/:id/read', authenticateToken, async (req, res) => {
+    try {
+        const notification = await markNotificationRead(req.params.id);
+        res.json({ success: true, notification });
+    } catch (error) {
+        console.error('❌ Mark notification read error:', error);
+        res.status(500).json({ error: 'Failed to mark notification', message: error.message });
+    }
+});
+
+// ─── BOOTHS (kept for Phase 1 compat) ─────────────────────────
+
 router.get('/booths', async (req, res) => {
     try {
-        let booths = [];
-        try {
-            booths = await (await import('../utils/supabaseClient.js')).getBooths();
-            if (!booths || booths.length === 0) throw new Error("No booths in DB");
-        } catch (err) {
-            console.warn('Supabase booth fetch failed, using local fallback:', err.message);
-            // Fallback to local
-            // We can just reuse readBooths helper but it might need to be exported or available in scope. 
-            // readBooths is in scope.
-            booths = readBooths();
-        }
-
-        res.json({
-            success: true,
-            booths,
-        });
+        const { getBooths } = await import('../utils/supabaseClient.js');
+        const booths = await getBooths();
+        res.json({ success: true, booths });
     } catch (error) {
-        console.error('❌ Error fetching booths:', error);
-        res.status(500).json({
-            error: 'Failed to fetch booths',
-            message: error.message,
-        });
+        res.status(500).json({ error: 'Failed to fetch booths', message: error.message });
     }
 });
 

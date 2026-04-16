@@ -1,100 +1,215 @@
 /**
- * Officer Routes
- * Handles officer operations including booth unlocking and audit logs
+ * Officer / BLO Routes — Phase 2
+ * Dept-scope validation, roll-number voter search, audit logs scoped to BLO's booth
  */
 
 import express from 'express';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { authenticateToken } from './auth.js';
+import {
+    getStudentByRollNumber,
+    getBLOById,
+    getActiveElection,
+    hasStudentVoted,
+    addAuditLog,
+    getAuditLogs,
+} from '../utils/supabaseClient.js';
+import { getFlag, setFlag } from '../utils/flagsManager.js';
 
 const router = express.Router();
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
-const LOGS_DB_PATH = path.join(__dirname, '..', 'data', 'logs.json');
-
-// =================== Helper Functions ===================
-
-function readLogs() {
-    try {
-        if (!fs.existsSync(LOGS_DB_PATH)) {
-            try {
-                fs.mkdirSync(path.dirname(LOGS_DB_PATH), { recursive: true });
-                fs.writeFileSync(LOGS_DB_PATH, JSON.stringify([], null, 2));
-            } catch (err) {
-                console.warn('⚠️ Cannot create local log file (likely read-only FS). Returning empty logs.');
-                return [];
-            }
-        }
-        return JSON.parse(fs.readFileSync(LOGS_DB_PATH, 'utf8'));
-    } catch (err) {
-        console.error('❌ Failed to read local logs:', err.message);
-        return [];
-    }
-}
-
-function writeLogs(logs) {
-    try {
-        fs.writeFileSync(LOGS_DB_PATH, JSON.stringify(logs, null, 2));
-    } catch (err) {
-        console.error('❌ Failed to write local logs (likely read-only FS):', err.message);
-    }
-}
-
-function addLog(logEntry) {
-    // Try adding log to Supabase, fallback to local file
-    (async () => {
-        try {
-            const logObj = {
-                id: `LOG_${Date.now()}`,
-                action: logEntry.action,
-                booth_id: logEntry.boothId || null,
-                voter_aadhar: logEntry.voterAadhar || null,
-                officer_id: logEntry.officerId || null,
-                status: logEntry.status || null,
-                details: { error: logEntry.error || null },
-                timestamp: new Date().toISOString(),
-            };
-            await (await import('../utils/supabaseClient.js')).addLog(logObj);
-            return;
-        } catch (err) {
-            console.error('❌ Supabase addLog failed, falling back to local file:', err.message);
-        }
-
-        const logs = readLogs();
-        logs.push({
-            ...logEntry,
-            timestamp: new Date().toISOString(),
-            id: `LOG_${Date.now()}`,
-        });
-        writeLogs(logs);
-    })();
-}
-
-// =================== Routes ===================
+// ─── VOTER SEARCH ─────────────────────────────────────────────
 
 /**
- * POST /api/officer/unlock-booth
- * Unlock a polling booth for a specific voter via WebSocket
+ * GET /api/officer/search-voter?rollNumber=...
+ * Search voter by roll number. Validates dept match with BLO's assigned booth.
  */
-router.post('/unlock-booth', async (req, res) => {
+router.get('/search-voter', authenticateToken, async (req, res) => {
     try {
-        const { boothId, voterAadhar, voterName, voterPhoto, officerId } = req.body;
+        const { rollNumber } = req.query;
+        if (!rollNumber) {
+            return res.status(400).json({ error: 'rollNumber query parameter required' });
+        }
 
-        // Validate inputs
-        if (!boothId || !voterAadhar) {
-            return res.status(400).json({
-                error: 'Missing required fields: boothId, voterAadhar',
+        const student = await getStudentByRollNumber(rollNumber.toUpperCase());
+        if (!student) {
+            return res.status(404).json({ error: 'Student not found' });
+        }
+
+        // Get BLO's department scope from JWT
+        const bloDepart = req.user.department;
+
+        // If BLO has a department (i.e., not admin), check dept match
+        if (bloDepart && student.department !== bloDepart) {
+            const correctBooth = student.booths;
+            return res.status(403).json({
+                error: `This student belongs to ${student.department} department.`,
+                redirectMessage: `Please direct them to ${student.department} Booth${correctBooth ? ': ' + correctBooth.address : ''}.`,
+                studentDepartment: student.department,
+                correctBoothAddress: correctBooth?.address || null,
             });
         }
 
-        // Get Socket.io instance from app
+        res.json({
+            success: true,
+            voter: {
+                id: student.id,
+                fullName: `${student.first_name} ${student.middle_name || ''} ${student.last_name}`.trim(),
+                rollNumber: student.roll_number,
+                department: student.department,
+                year: student.year,
+                imageUrl: student.image_url,
+                boothId: student.booth_id,
+                boothAddress: student.booths?.address,
+                voterHash: student.voter_hash,
+            },
+        });
+    } catch (error) {
+        console.error('❌ Search voter error:', error);
+        res.status(500).json({ error: 'Failed to search voter', message: error.message });
+    }
+});
+
+// ─── VERIFY IDENTITY ──────────────────────────────────────────
+
+/**
+ * POST /api/officer/verify-identity
+ * Verify voter identity (PIN or fingerprint based on biometric_mode flag)
+ * Body: { rollNumber, pin? | fingerprintTemplate? }
+ * Returns { verified: true/false, hasVoted: true/false }
+ */
+router.post('/verify-identity', authenticateToken, async (req, res) => {
+    try {
+        const { rollNumber, pin, fingerprintTemplate } = req.body;
+        if (!rollNumber) {
+            return res.status(400).json({ error: 'rollNumber required' });
+        }
+
+        const student = await getStudentByRollNumber(rollNumber.toUpperCase());
+        if (!student) {
+            return res.status(404).json({ error: 'Student not found' });
+        }
+
+        const biometricMode = await getFlag('biometric_mode');
+
+        if (biometricMode) {
+            // ── FINGERPRINT MODE ──
+            if (!fingerprintTemplate) {
+                return res.status(400).json({ error: 'Fingerprint scan required (biometric_mode=true)' });
+            }
+            // Import verifyFingerprint dynamically
+            const { verifyFingerprint } = await import('../utils/biometric.js');
+            if (!student.fingerprint_id) {
+                return res.status(400).json({ error: 'Student has no fingerprint on file. Cannot verify.' });
+            }
+            const verification = await verifyFingerprint(student.fingerprint_id, fingerprintTemplate);
+            if (!verification.verified) {
+                await addAuditLog({
+                    event_type: 'IDENTITY_VERIFY_FAILED',
+                    blo_id: req.user.userId,
+                    booth_id: req.user.boothId,
+                    student_id: student.id,
+                    details: { method: 'fingerprint', score: verification.score },
+                }).catch(() => {});
+                return res.status(401).json({ error: 'Fingerprint verification failed', verified: false, score: verification.score });
+            }
+        } else {
+            // ── PIN MODE ──
+            if (!pin) {
+                return res.status(400).json({ error: 'PIN required for identity verification' });
+            }
+            if (!/^\d{4}$/.test(String(pin))) {
+                return res.status(400).json({ error: 'PIN must be 4 digits' });
+            }
+
+            const { default: bcrypt } = await import('bcryptjs');
+            if (!student.pin_hash) {
+                // Legacy fallback
+                if (String(pin) !== '1234') {
+                    await addAuditLog({
+                        event_type: 'IDENTITY_VERIFY_FAILED',
+                        blo_id: req.user.userId,
+                        booth_id: req.user.boothId,
+                        student_id: student.id,
+                        details: { method: 'pin', reason: 'wrong_pin_legacy' },
+                    }).catch(() => {});
+                    return res.status(401).json({ error: 'Incorrect PIN', verified: false });
+                }
+            } else {
+                const pinMatch = await bcrypt.compare(String(pin), student.pin_hash);
+                if (!pinMatch) {
+                    await addAuditLog({
+                        event_type: 'IDENTITY_VERIFY_FAILED',
+                        blo_id: req.user.userId,
+                        booth_id: req.user.boothId,
+                        student_id: student.id,
+                        details: { method: 'pin', reason: 'wrong_pin' },
+                    }).catch(() => {});
+                    return res.status(401).json({ error: 'Incorrect PIN', verified: false });
+                }
+            }
+        }
+
+        // Check if already voted
+        const activeElection = await getActiveElection();
+        let hasVoted = false;
+        if (activeElection) {
+            hasVoted = await hasStudentVoted(activeElection.id, student.id);
+        }
+
+        await addAuditLog({
+            event_type: 'IDENTITY_VERIFIED',
+            blo_id: req.user.userId,
+            booth_id: req.user.boothId,
+            student_id: student.id,
+            details: { method: biometricMode ? 'fingerprint' : 'pin', hasVoted },
+        }).catch(() => {});
+
+        res.json({
+            success: true,
+            verified: true,
+            hasVoted,
+            voter: {
+                id: student.id,
+                fullName: `${student.first_name} ${student.middle_name || ''} ${student.last_name}`.trim(),
+                rollNumber: student.roll_number,
+                department: student.department,
+                voterHash: student.voter_hash,
+                imageUrl: student.image_url,
+            },
+        });
+    } catch (error) {
+        console.error('❌ Verify identity error:', error);
+        res.status(500).json({ error: 'Verification failed', message: error.message });
+    }
+});
+
+// ─── UNLOCK BOOTH ─────────────────────────────────────────────
+
+/**
+ * POST /api/officer/unlock-booth
+ * Unlock booth for a verified student. Validates:
+ * 1. Student dept matches BLO's booth dept
+ * 2. Active election scope allows this booth
+ * 3. Booth is connected
+ */
+router.post('/unlock-booth', authenticateToken, async (req, res) => {
+    try {
+        const {
+            boothId,
+            voterRollNumber,
+            voterName,
+            voterPhoto,
+            voterHash,
+        } = req.body;
+
+        if (!boothId || !voterRollNumber) {
+            return res.status(400).json({ error: 'boothId and voterRollNumber required' });
+        }
+
         const io = req.app.get('io');
         const activeBooths = req.app.get('activeBooths');
 
-        // Check if booth is connected
+        // Validate booth is connected
         if (!activeBooths.has(boothId)) {
             return res.status(404).json({
                 error: `Booth ${boothId} is not currently connected`,
@@ -102,215 +217,261 @@ router.post('/unlock-booth', async (req, res) => {
             });
         }
 
-        // Emit WebSocket event to specific booth room
+        const student = await getStudentByRollNumber(voterRollNumber.toUpperCase());
+        if (!student) {
+            return res.status(404).json({ error: 'Student not found' });
+        }
+
+        // ── ALREADY VOTED CHECK (block at BLO side, not booth side) ──
+        const activeElection = await getActiveElection();
+        if (activeElection) {
+            const alreadyVoted = await hasStudentVoted(activeElection.id, student.id);
+            if (alreadyVoted) {
+                await addAuditLog({
+                    event_type: 'ALREADY_VOTED_BLOCKED',
+                    blo_id: req.user.userId,
+                    booth_id: boothId,
+                    student_id: student.id,
+                    election_id: activeElection.id,
+                    details: { reason: 'BLO tried to unlock booth for already-voted student' },
+                }).catch(() => {});
+                return res.status(403).json({
+                    error: `❌ ${student.first_name} ${student.last_name} (${student.roll_number}) has already voted in this election.`,
+                    alreadyVoted: true,
+                });
+            }
+        }
+        const bloDepart = req.user.department;
+        if (bloDepart && student.department !== bloDepart) {
+            await addAuditLog({
+                event_type: 'DEPT_MISMATCH',
+                blo_id: req.user.userId,
+                booth_id: boothId,
+                student_id: student.id,
+                details: {
+                    studentDept: student.department,
+                    bloDept: bloDepart,
+                    reason: 'Department mismatch — unlock blocked',
+                },
+            }).catch(() => {});
+
+            return res.status(403).json({
+                error: `Student belongs to ${student.department} department, not ${bloDepart}.`,
+                redirectMessage: `Direct student to ${student.department} Booth at: ${student.booths?.address || 'their department booth'}`,
+            });
+        }
+
+        // Active election scope validation (activeElection already fetched in vote-check above)
+        if (activeElection) {
+            // DR: only the specific dept booth can be unlocked
+            if (activeElection.election_type === 'DR' && activeElection.department) {
+                if (student.department !== activeElection.department) {
+                    return res.status(403).json({
+                        error: `Current election is for ${activeElection.department} department only. This student is not eligible to vote.`,
+                    });
+                }
+            }
+            // CR: dept + year check
+            if (activeElection.election_type === 'CR') {
+                if (student.department !== activeElection.department) {
+                    return res.status(403).json({
+                        error: `Current election is for ${activeElection.department} department only.`,
+                    });
+                }
+                if (String(student.year) !== String(activeElection.year)) {
+                    return res.status(403).json({
+                        error: `Current election is for Year ${activeElection.year} only. Student is in Year ${student.year}.`,
+                    });
+                }
+            }
+        }
+
+        // Get active election candidates for the booth
+        let candidateList = [];
+        if (activeElection) {
+            const candidates = await (await import('../utils/supabaseClient.js')).getCandidatesByElection(activeElection.id);
+            candidateList = candidates.map(c => ({
+                id: c.id,
+                serialNo: c.serial_no,
+                name: `${c.students.first_name} ${c.students.last_name}`,
+                department: c.students.department,
+                year: c.students.year,
+                imageUrl: c.students.image_url,
+            }));
+        }
+
+        // Emit allow_vote to booth
         const eventData = {
-            voterAadhar,
-            voterName: voterName || 'Authorized Voter',
-            voterPhoto: voterPhoto || '',
-            authorizedBy: officerId || 'OFFICER_001',
+            voterRollNumber: student.roll_number,
+            voterHash: student.voter_hash,
+            voterName: voterName || `${student.first_name} ${student.last_name}`,
+            voterPhoto: voterPhoto || student.image_url || '',
+            voterDept: student.department,
+            voterYear: student.year,
+            authorizedBy: req.user.userId,
             authorizedAt: new Date().toISOString(),
+            electionId: activeElection?.id || null,
+            blockchainElectionId: activeElection?.blockchain_election_id || null,
+            electionType: activeElection?.election_type || null,
+            candidates: candidateList,
+            // Auth mode: booth uses this to decide fingerprint vs PIN confirmation
+            biometricMode: await getFlag('biometric_mode'),
         };
 
         io.to(`booth_${boothId}`).emit('allow_vote', eventData);
 
-        console.log(`🔓 Booth ${boothId} unlocked for voter: ${voterAadhar}`);
+        // Audit log
+        await addAuditLog({
+            event_type: 'UNLOCK_BOOTH',
+            blo_id: req.user.userId,
+            booth_id: boothId,
+            student_id: student.id,
+            election_id: activeElection?.id || null,
+            details: { status: 'success', voterRollNumber },
+        }).catch(() => {});
 
-        // Log the unlock event for audit trail
-        addLog({
-            action: 'UNLOCK_BOOTH',
-            boothId,
-            voterAadhar,
-            voterName,
-            officerId: officerId || 'OFFICER_001',
-            status: 'success',
-        });
-
-        // Update booth status
+        // Update booth status in-memory
         const boothInfo = activeBooths.get(boothId);
         boothInfo.status = 'active';
         boothInfo.lastUnlocked = new Date();
         activeBooths.set(boothId, boothInfo);
 
+        console.log(`🔓 Booth ${boothId} unlocked for: ${student.roll_number}`);
+
         res.json({
             success: true,
-            message: `Booth ${boothId} unlocked successfully`,
+            message: `Booth ${boothId} unlocked for ${student.roll_number}`,
             boothId,
-            voterAadhar,
+            voterRollNumber: student.roll_number,
         });
     } catch (error) {
         console.error('❌ Unlock booth error:', error);
+        await addAuditLog({
+            event_type: 'UNLOCK_BOOTH',
+            booth_id: req.body.boothId,
+            details: { status: 'failed', error: error.message },
+        }).catch(() => {});
 
-        // Log the failed attempt
-        addLog({
-            action: 'UNLOCK_BOOTH',
-            boothId: req.body.boothId,
-            voterAadhar: req.body.voterAadhar,
-            officerId: req.body.officerId || 'OFFICER_001',
-            status: 'failed',
-            error: error.message,
-        });
-
-        res.status(500).json({
-            error: 'Failed to unlock booth',
-            message: error.message,
-        });
+        res.status(500).json({ error: 'Failed to unlock booth', message: error.message });
     }
 });
 
+// ─── RESET BOOTH ──────────────────────────────────────────────
+
 /**
  * POST /api/officer/reset-booth
- * Reset a booth back to idle state
+ * Reset a booth to idle state
  */
-router.post('/reset-booth', (req, res) => {
+router.post('/reset-booth', authenticateToken, (req, res) => {
     try {
-        const { boothId, officerId } = req.body;
-
-        if (!boothId) {
-            return res.status(400).json({
-                error: 'Booth ID required',
-            });
-        }
+        const { boothId } = req.body;
+        if (!boothId) return res.status(400).json({ error: 'boothId required' });
 
         const io = req.app.get('io');
         const activeBooths = req.app.get('activeBooths');
 
         if (!activeBooths.has(boothId)) {
-            return res.status(404).json({
-                error: `Booth ${boothId} is not connected`,
-            });
+            return res.status(404).json({ error: `Booth ${boothId} is not connected` });
         }
 
-        // Emit reset event
         io.to(`booth_${boothId}`).emit('reset_booth', {
-            message: 'Booth reset by officer',
-            resetBy: officerId || 'OFFICER_001',
+            message: 'Booth reset by BLO',
+            resetBy: req.user.userId,
         });
 
-        // Update booth status
         const boothInfo = activeBooths.get(boothId);
         boothInfo.status = 'idle';
         activeBooths.set(boothId, boothInfo);
 
-        // Log the action
-        addLog({
-            action: 'RESET_BOOTH',
-            boothId,
-            officerId: officerId || 'OFFICER_001',
-            status: 'success',
-        });
+        addAuditLog({
+            event_type: 'RESET_BOOTH',
+            blo_id: req.user.userId,
+            booth_id: boothId,
+            details: { status: 'success' },
+        }).catch(() => {});
 
         console.log(`🔄 Booth ${boothId} reset to idle`);
-
-        res.json({
-            success: true,
-            message: `Booth ${boothId} reset successfully`,
-        });
+        res.json({ success: true, message: `Booth ${boothId} reset successfully` });
     } catch (error) {
         console.error('❌ Reset booth error:', error);
-        res.status(500).json({
-            error: 'Failed to reset booth',
-            message: error.message,
-        });
+        res.status(500).json({ error: 'Failed to reset booth', message: error.message });
     }
 });
+
+// ─── AUDIT LOGS ───────────────────────────────────────────────
 
 /**
  * GET /api/officer/audit-logs
- * Get audit logs for all booth operations
+ * Audit logs scoped to BLO's assigned booth
  */
-router.get('/audit-logs', async (req, res) => {
+router.get('/audit-logs', authenticateToken, async (req, res) => {
     try {
-        let logs = [];
-        try {
-            logs = await (await import('../utils/supabaseClient.js')).getLogs(req.query);
-        } catch (err) {
-            console.warn('Supabase logs fetch failed, using local fallback:', err.message);
-            logs = readLogs();
-            // Apply filters locally if fallback
-            const { startDate, endDate, boothId, action } = req.query;
-            let filteredLogs = logs;
+        // Scope logs to BLO's assigned booth
+        const boothId = req.user.boothId || req.query.boothId;
+        const logs = await getAuditLogs({ boothId, limit: 100 });
 
-            if (startDate) {
-                filteredLogs = filteredLogs.filter(
-                    log => new Date(log.timestamp) >= new Date(startDate)
-                );
-            }
-
-            if (endDate) {
-                filteredLogs = filteredLogs.filter(
-                    log => new Date(log.timestamp) <= new Date(endDate)
-                );
-            }
-
-            if (boothId) {
-                filteredLogs = filteredLogs.filter(log => log.boothId === boothId);
-            }
-
-            if (action) {
-                filteredLogs = filteredLogs.filter(log => log.action === action);
-            }
-            logs = filteredLogs;
-        }
-
-        // Sort by timestamp descending (newest first)
-        logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-        res.json({
-            success: true,
-            count: logs.length,
-            logs: logs,
-        });
+        res.json({ success: true, count: logs.length, logs });
     } catch (error) {
-        console.error('❌ Error fetching audit logs:', error);
-        res.status(500).json({
-            error: 'Failed to fetch audit logs',
-            message: error.message,
-        });
+        console.error('❌ Audit logs error:', error);
+        res.status(500).json({ error: 'Failed to fetch audit logs', message: error.message });
     }
 });
 
-/**
- * GET /api/officer/stats
- * Get statistics for officer dashboard
- */
-router.get('/stats', async (req, res) => {
+// Stats endpoint (kept for backward compat)
+router.get('/stats', authenticateToken, async (req, res) => {
     try {
-        let logs = [];
-        try {
-            logs = await (await import('../utils/supabaseClient.js')).getLogs();
-        } catch (err) {
-            logs = readLogs();
-        }
-
         const activeBooths = req.app.get('activeBooths');
+        const boothId = req.user.boothId;
+        const logs = await getAuditLogs({ boothId, limit: 500 });
 
         const stats = {
-            totalUnlocks: logs.filter(l => l.action === 'UNLOCK_BOOTH').length,
-            successfulUnlocks: logs.filter(
-                l => l.action === 'UNLOCK_BOOTH' && l.status === 'success'
-            ).length,
-            failedUnlocks: logs.filter(
-                l => l.action === 'UNLOCK_BOOTH' && l.status === 'failed'
-            ).length,
+            totalUnlocks: logs.filter(l => l.event_type === 'UNLOCK_BOOTH').length,
+            successfulUnlocks: logs.filter(l => l.event_type === 'UNLOCK_BOOTH' && l.details?.status === 'success').length,
+            failedUnlocks: logs.filter(l => l.event_type === 'UNLOCK_BOOTH' && l.details?.status === 'failed').length,
             activeBooths: activeBooths.size,
-            boothStatuses: Array.from(activeBooths.entries()).map(([id, info]) => ({
-                boothId: id,
-                status: info.status,
-                connectedAt: info.connectedAt,
-                lastUnlocked: info.lastUnlocked || null,
-            })),
         };
+
+        res.json({ success: true, stats });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch stats', message: error.message });
+    }
+});
+
+// ─── SYSTEM FLAGS ───────────────────────────────────────────────────
+
+/**
+ * PUT /api/officer/flags/:key
+ * Allows BLO to toggle verification mode per user feasibility
+ */
+router.put('/flags/:key', authenticateToken, async (req, res) => {
+    try {
+        const { key } = req.params;
+        const { value } = req.body;
+
+        if (typeof value !== 'boolean') {
+            return res.status(400).json({ error: '"value" must be a boolean (true or false)' });
+        }
+
+        const data = await setFlag(key, value);
+
+        // Audit log the change
+        await addAuditLog({
+            event_type: 'FLAG_UPDATED',
+            blo_id: req.user.userId,
+            booth_id: req.user.boothId,
+            details: { key, oldValue: !value, newValue: value },
+        }).catch(() => {});
+
+        console.log(`🏁 [Officer] Flag "${key}" set to ${value} by BLO ${req.user.userId}`);
 
         res.json({
             success: true,
-            stats,
+            message: `Flag "${key}" updated to ${value}`,
+            flag: data
         });
     } catch (error) {
-        console.error('❌ Error fetching stats:', error);
-        res.status(500).json({
-            error: 'Failed to fetch statistics',
-            message: error.message,
-        });
+        console.error('❌ Update flag error:', error);
+        res.status(500).json({ error: 'Failed to update flag', message: error.message });
     }
 });
 

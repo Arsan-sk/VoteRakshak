@@ -5,6 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:booth1": "vite --mode booth1",
+    "dev:booth2": "vite --mode booth2",
+    "dev:booth3": "vite --mode booth3",
+    "dev:booth4": "vite --mode booth4",
+    "dev:booth5": "vite --mode booth5",
+    "dev:booth6": "vite --mode booth6",
+    "dev:booth7": "vite --mode booth7",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
