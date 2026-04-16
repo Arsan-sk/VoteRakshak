@@ -65,6 +65,12 @@ export async function getFlags() {
     return response.data;
 }
 
+/** Set system flags (officer auth) */
+export async function setOfficerFlag(key, value) {
+    const response = await api.put(`/officer/flags/${key}`, { value });
+    return response.data;
+}
+
 /** Reset booth */
 export async function resetBooth(boothId) {
     const response = await api.post('/officer/reset-booth', { boothId });
@@ -101,4 +107,4 @@ export async function getActiveElection() {
     return response.data;
 }
 
-export default { login, searchVoterByRollNumber, getVoter, unlockBooth, verifyVoterIdentity, getFlags, resetBooth, getAuditLogs, getStats, getBooths, getActiveBooths, getActiveElection };
+export default { login, searchVoterByRollNumber, getVoter, unlockBooth, verifyVoterIdentity, getFlags, setOfficerFlag, resetBooth, getAuditLogs, getStats, getBooths, getActiveBooths, getActiveElection };

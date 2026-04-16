@@ -377,7 +377,17 @@ export async function getLogs(filters = {}) {
 // ─── ELECTED POSITIONS ───────────────────────────────────────
 
 export async function recordElectedPosition(position) {
-    // Upsert: one student can only hold one position at a time
+    // 1. Remove the old holder for this precise position
+    let query = supabase.from('elected_positions').delete().eq('position', position.position);
+    if (position.position === 'DR' || position.position === 'CR') {
+        query = query.eq('department', position.department);
+    }
+    if (position.position === 'CR') {
+        query = query.eq('year', position.year);
+    }
+    await query;
+
+    // 2. Insert the new winner
     const { data, error } = await supabase
         .from('elected_positions')
         .upsert([position], { onConflict: 'student_id' })
@@ -400,7 +410,7 @@ export async function isStudentCurrentlyElected(studentId) {
 export async function getElectedPositions() {
     const { data, error } = await supabase
         .from('elected_positions')
-        .select('*, students(first_name, last_name, roll_number, department, year, image_url), elections(election_type)');
+        .select('*, students(first_name, last_name, roll_number, department, year, image_url), elections(election_type, department, year)');
     if (error) throw error;
     return data;
 }
@@ -417,7 +427,7 @@ export async function getElectedPositionsHistory() {
     const { data, error } = await supabase
         .from('elected_positions')
         .select('*, students(first_name, last_name, roll_number, department, year, image_url), elections(election_type, department, year, status, ended_at)')
-        .order('created_at', { ascending: false });
+        .order('elected_at', { ascending: false });
     if (error) throw error;
     return data;
 }

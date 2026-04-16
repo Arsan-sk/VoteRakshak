@@ -13,7 +13,7 @@ import {
     addAuditLog,
     getAuditLogs,
 } from '../utils/supabaseClient.js';
-import { getFlag } from '../utils/flagsManager.js';
+import { getFlag, setFlag } from '../utils/flagsManager.js';
 
 const router = express.Router();
 
@@ -434,6 +434,44 @@ router.get('/stats', authenticateToken, async (req, res) => {
         res.json({ success: true, stats });
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch stats', message: error.message });
+    }
+});
+
+// ─── SYSTEM FLAGS ───────────────────────────────────────────────────
+
+/**
+ * PUT /api/officer/flags/:key
+ * Allows BLO to toggle verification mode per user feasibility
+ */
+router.put('/flags/:key', authenticateToken, async (req, res) => {
+    try {
+        const { key } = req.params;
+        const { value } = req.body;
+
+        if (typeof value !== 'boolean') {
+            return res.status(400).json({ error: '"value" must be a boolean (true or false)' });
+        }
+
+        const data = await setFlag(key, value);
+
+        // Audit log the change
+        await addAuditLog({
+            event_type: 'FLAG_UPDATED',
+            blo_id: req.user.userId,
+            booth_id: req.user.boothId,
+            details: { key, oldValue: !value, newValue: value },
+        }).catch(() => {});
+
+        console.log(`🏁 [Officer] Flag "${key}" set to ${value} by BLO ${req.user.userId}`);
+
+        res.json({
+            success: true,
+            message: `Flag "${key}" updated to ${value}`,
+            flag: data
+        });
+    } catch (error) {
+        console.error('❌ Update flag error:', error);
+        res.status(500).json({ error: 'Failed to update flag', message: error.message });
     }
 });
 

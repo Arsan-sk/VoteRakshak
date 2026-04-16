@@ -102,3 +102,27 @@ export async function initFlags() {
     await _fetchAllFromDB();
     console.log('✅ [FlagsManager] System flags loaded:', _cache.flags);
 }
+
+/**
+ * Set a single flag value (true/false)
+ */
+export async function setFlag(key, value) {
+    if (typeof value !== 'boolean') {
+        throw new Error('"value" must be a boolean');
+    }
+
+    const { data, error } = await supabase
+        .from('system_flags')
+        .update({ value })
+        .eq('key', key)
+        .select()
+        .single();
+
+    if (error || !data) {
+        throw new Error(`Flag "${key}" not found or update failed: ${error?.message}`);
+    }
+
+    // Force refresh cache
+    await _fetchAllFromDB();
+    return data;
+}

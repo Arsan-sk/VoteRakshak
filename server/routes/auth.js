@@ -299,7 +299,7 @@ export function authenticateToken(req, res, next) {
     if (!token) return res.status(401).json({ error: 'Access token required' });
 
     jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret', (err, user) => {
-        if (err) return res.status(403).json({ error: 'Invalid or expired token' });
+        if (err) return res.status(401).json({ error: 'Your session has expired. Please logout and login again.', code: 'TOKEN_INVALID' });
         req.user = user;
         next();
     });

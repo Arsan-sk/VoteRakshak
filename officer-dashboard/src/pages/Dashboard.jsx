@@ -8,7 +8,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { searchVoterByRollNumber, verifyVoterIdentity, unlockBooth, getActiveBooths, getFlags } from '../utils/api';
+import { searchVoterByRollNumber, verifyVoterIdentity, unlockBooth, getActiveBooths, getFlags, getActiveElection, setOfficerFlag } from '../utils/api';
 import { io } from 'socket.io-client';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
@@ -47,17 +47,31 @@ function Dashboard() {
     const boothAddress = localStorage.getItem('boothAddress') || '—';
     const department = localStorage.getItem('department') || '—';
 
+    const [activeElection, setActiveElection] = useState(null);
+
     useEffect(() => {
         if (!localStorage.getItem('token')) { navigate('/'); return; }
         loadActiveBooths();
         loadFlags();
+        loadActiveElection();
 
         const socket = io(BACKEND_URL);
         socketRef.current = socket;
         socket.on('booth_status_update', () => loadActiveBooths());
+        socket.on('election_started', () => loadActiveElection());
+        socket.on('election_ended', () => { loadActiveElection(); setVoter(null); });
         const interval = setInterval(loadActiveBooths, 5000);
         return () => { clearInterval(interval); socket.disconnect(); };
     }, [navigate]);
+
+    async function loadActiveElection() {
+        try {
+            const res = await getActiveElection();
+            setActiveElection(res.election || null);
+        } catch {
+            setActiveElection(null);
+        }
+    }
 
     async function loadActiveBooths() {
         try {
@@ -76,6 +90,19 @@ function Dashboard() {
             setBiometricMode(result.flags?.biometric_mode ?? false);
         } catch {
             setBiometricMode(false);
+        }
+    }
+
+    async function handleToggleBiometric(newMode) {
+        if (newMode === biometricMode) return;
+        try {
+            setBiometricMode(newMode);
+            await setOfficerFlag('biometric_mode', newMode);
+            setSuccess(`✅ Verification mode switched to ${newMode ? 'Fingerprint' : 'PIN'}`);
+            setTimeout(() => setSuccess(''), 3000);
+        } catch (err) {
+            setError(err.response?.data?.error || 'Failed to update verification mode');
+            setBiometricMode(!newMode); // Revert on failure
         }
     }
 
@@ -227,89 +254,103 @@ function Dashboard() {
                 {/* Main — Voter Verification */}
                 <div className="lg:col-span-2 space-y-6">
 
-                    {/* Search */}
-                    <div className="bg-gray-800/80 rounded-xl p-6 border border-blue-700/50">
-                        <h2 className="text-xl font-bold text-white mb-4">🔍 Voter Verification</h2>
-                        <form onSubmit={handleSearch} className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-300 mb-2">Student Roll Number</label>
-                                <div className="flex gap-2">
-                                    <input type="text" value={rollNumber}
-                                        onChange={e => setRollNumber(e.target.value.toUpperCase())}
-                                        className={`flex-1 ${inputCls}`}
-                                        placeholder="e.g. 23CO12" autoFocus required />
-                                    <button type="submit" disabled={loading}
-                                        className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-lg font-semibold transition-colors disabled:opacity-50">
-                                        {loading ? 'Searching...' : 'Search'}
-                                    </button>
-                                </div>
-                            </div>
-                        </form>
-                        {error && <div className="mt-4 bg-red-900/40 border border-red-600 text-red-200 px-4 py-3 rounded-lg text-sm">{error}</div>}
-                        {success && <div className="mt-4 bg-green-900/40 border border-green-600 text-green-200 px-4 py-3 rounded-lg text-sm">{success}</div>}
-                    </div>
-
-                    {/* Voter Details Card */}
-                    {voter && (
-                        <div className={`bg-gray-800/80 rounded-xl p-6 border ${isVerified && !hasVoted ? 'border-green-600/60' : 'border-yellow-600/60'}`}>
-                            <div className="flex items-center justify-between mb-4">
-                                <h2 className="text-xl font-bold text-white">
-                                    {isVerified ? (hasVoted ? '❌ Already Voted' : '✅ Verified Voter') : '⏳ Pending Verification'}
-                                </h2>
-                                {isVerified && (
-                                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${hasVoted ? 'bg-red-500/20 text-red-300 border border-red-500' : 'bg-green-500/20 text-green-300 border border-green-500'}`}>
-                                        {hasVoted ? 'VOTED' : 'VERIFIED'}
-                                    </span>
-                                )}
-                            </div>
-
-                            <div className="flex flex-wrap gap-5 mb-5">
-                                {voter.imageUrl ? (
-                                    <img src={voter.imageUrl} alt="Voter"
-                                        className={`w-28 h-28 rounded-xl border-4 object-cover flex-shrink-0 ${isVerified && !hasVoted ? 'border-green-500' : 'border-gray-600'}`} />
-                                ) : (
-                                    <div className="w-28 h-28 rounded-xl border-4 border-gray-600 bg-gray-700 flex items-center justify-center flex-shrink-0">
-                                        <span className="text-4xl">👤</span>
-                                    </div>
-                                )}
-                                <div className="flex-1 grid grid-cols-2 gap-3 text-sm">
-                                    {[
-                                        { label: 'Full Name', value: voter.fullName },
-                                        { label: 'Roll Number', value: voter.rollNumber },
-                                        { label: 'Department', value: `${voter.department} — ${DEPT_NAMES[voter.department] || ''}` },
-                                        { label: 'Year', value: `Year ${voter.year}` },
-                                    ].map(item => (
-                                        <div key={item.label}>
-                                            <p className="text-gray-400 text-xs">{item.label}</p>
-                                            <p className="text-white font-semibold">{item.value}</p>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Action Buttons */}
-                            <div className="space-y-3">
-                                {!isVerified && (
-                                    <button onClick={openVerifyModal} disabled={loading}
-                                        className="w-full bg-yellow-600 hover:bg-yellow-500 text-white py-4 rounded-xl font-bold text-lg transition-all shadow-lg">
-                                        {biometricMode ? '👆 Verify Identity (Fingerprint)' : '🔢 Verify Identity (PIN)'}
-                                    </button>
-                                )}
-
-                                {isVerified && !hasVoted && (
-                                    <button onClick={handleUnlockBooth} disabled={loading}
-                                        className="w-full bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white py-4 rounded-xl font-bold text-lg transition-all shadow-lg">
-                                        {loading ? 'Unlocking...' : `🔓 Unlock ${boothName || boothId} for ${voter.fullName}`}
-                                    </button>
-                                )}
-
-                                {isVerified && hasVoted && (
-                                    <div className="bg-red-900/30 border border-red-600 text-red-300 px-4 py-4 rounded-xl text-center font-bold">
-                                        ❌ This voter has already cast their vote. Booth cannot be unlocked.
-                                    </div>
-                                )}
-                            </div>
+                    {!activeElection && (
+                        <div className="bg-yellow-900/30 border border-yellow-600/50 rounded-xl p-6 text-center">
+                            <span className="text-4xl block mb-3">😴</span>
+                            <h2 className="text-xl font-bold text-yellow-500 mb-2">No Active Election</h2>
+                            <p className="text-gray-300">
+                                There are no elections currently running. Voter verification and booth unlocking are disabled until an election begins.
+                            </p>
                         </div>
+                    )}
+
+                    {activeElection && (
+                        <>
+                            {/* Search */}
+                            <div className="bg-gray-800/80 rounded-xl p-6 border border-blue-700/50">
+                                <h2 className="text-xl font-bold text-white mb-4">🔍 Voter Verification</h2>
+                                <form onSubmit={handleSearch} className="space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-300 mb-2">Student Roll Number</label>
+                                        <div className="flex gap-2">
+                                            <input type="text" value={rollNumber}
+                                                onChange={e => setRollNumber(e.target.value.toUpperCase())}
+                                                className={`flex-1 ${inputCls}`}
+                                                placeholder="e.g. 23CO12" autoFocus required />
+                                            <button type="submit" disabled={loading}
+                                                className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-lg font-semibold transition-colors disabled:opacity-50">
+                                                {loading ? 'Searching...' : 'Search'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </form>
+                                {error && <div className="mt-4 bg-red-900/40 border border-red-600 text-red-200 px-4 py-3 rounded-lg text-sm">{error}</div>}
+                                {success && <div className="mt-4 bg-green-900/40 border border-green-600 text-green-200 px-4 py-3 rounded-lg text-sm">{success}</div>}
+                            </div>
+
+                            {/* Voter Details Card */}
+                            {voter && (
+                                <div className={`bg-gray-800/80 rounded-xl p-6 border ${isVerified && !hasVoted ? 'border-green-600/60' : 'border-yellow-600/60'}`}>
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h2 className="text-xl font-bold text-white">
+                                            {isVerified ? (hasVoted ? '❌ Already Voted' : '✅ Verified Voter') : '⏳ Pending Verification'}
+                                        </h2>
+                                        {isVerified && (
+                                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${hasVoted ? 'bg-red-500/20 text-red-300 border border-red-500' : 'bg-green-500/20 text-green-300 border border-green-500'}`}>
+                                                {hasVoted ? 'VOTED' : 'VERIFIED'}
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    <div className="flex flex-wrap gap-5 mb-5">
+                                        {voter.imageUrl ? (
+                                            <img src={voter.imageUrl} alt="Voter"
+                                                className={`w-28 h-28 rounded-xl border-4 object-cover flex-shrink-0 ${isVerified && !hasVoted ? 'border-green-500' : 'border-gray-600'}`} />
+                                        ) : (
+                                            <div className="w-28 h-28 rounded-xl border-4 border-gray-600 bg-gray-700 flex items-center justify-center flex-shrink-0">
+                                                <span className="text-4xl">👤</span>
+                                            </div>
+                                        )}
+                                        <div className="flex-1 grid grid-cols-2 gap-3 text-sm">
+                                            {[
+                                                { label: 'Full Name', value: voter.fullName },
+                                                { label: 'Roll Number', value: voter.rollNumber },
+                                                { label: 'Department', value: `${voter.department} — ${DEPT_NAMES[voter.department] || ''}` },
+                                                { label: 'Year', value: `Year ${voter.year}` },
+                                            ].map(item => (
+                                                <div key={item.label}>
+                                                    <p className="text-gray-400 text-xs">{item.label}</p>
+                                                    <p className="text-white font-semibold">{item.value}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Action Buttons */}
+                                    <div className="space-y-3">
+                                        {!isVerified && (
+                                            <button onClick={openVerifyModal} disabled={loading}
+                                                className="w-full bg-yellow-600 hover:bg-yellow-500 text-white py-4 rounded-xl font-bold text-lg transition-all shadow-lg">
+                                                {biometricMode ? '👆 Verify Identity (Fingerprint)' : '🔢 Verify Identity (PIN)'}
+                                            </button>
+                                        )}
+
+                                        {isVerified && !hasVoted && (
+                                            <button onClick={handleUnlockBooth} disabled={loading}
+                                                className="w-full bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white py-4 rounded-xl font-bold text-lg transition-all shadow-lg">
+                                                {loading ? 'Unlocking...' : `🔓 Unlock ${boothName || boothId} for ${voter.fullName}`}
+                                            </button>
+                                        )}
+
+                                        {isVerified && hasVoted && (
+                                            <div className="bg-red-900/30 border border-red-600 text-red-300 px-4 py-4 rounded-xl text-center font-bold">
+                                                ❌ This voter has already cast their vote. Booth cannot be unlocked.
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </>
                     )}
                 </div>
 
@@ -333,12 +374,24 @@ function Dashboard() {
 
                     {/* Auth Mode */}
                     <div className="bg-gray-800/80 rounded-xl p-5 border border-blue-700/50">
-                        <h2 className="text-lg font-bold text-white mb-3">🔐 Auth Mode</h2>
-                        <div className={`rounded-lg px-4 py-3 border text-sm font-semibold ${biometricMode
-                            ? 'bg-emerald-900/20 border-emerald-600 text-emerald-300'
-                            : 'bg-indigo-900/20 border-indigo-600 text-indigo-300'}`}>
-                            {biometricMode ? '👆 Fingerprint Mode (Production)' : '🔢 PIN Mode (Testing)'}
+                        <div className="flex items-center justify-between mb-3">
+                            <h2 className="text-lg font-bold text-white">🔐 Auth Mode</h2>
                         </div>
+                        <div className="flex bg-gray-700 p-1 rounded-lg">
+                            <button
+                                onClick={() => handleToggleBiometric(true)}
+                                className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all ${biometricMode ? 'bg-emerald-600 text-white shadow-md' : 'text-gray-400 hover:text-gray-200'}`}
+                            >
+                                👆 Fingerprint
+                            </button>
+                            <button
+                                onClick={() => handleToggleBiometric(false)}
+                                className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all ${!biometricMode ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:text-gray-200'}`}
+                            >
+                                🔢 PIN
+                            </button>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-2 text-center">Toggle to switch verification for the current voter</p>
                     </div>
 
                     {/* Active Booths */}
