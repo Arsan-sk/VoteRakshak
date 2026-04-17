@@ -57,25 +57,56 @@ function VotingScreen({ authorizedVoter, activeElection, candidates, onVoteSucce
         setIsProcessing(true);
         setPinError('');
         const xhr = new XMLHttpRequest();
+        const timeout = setTimeout(() => {
+            xhr.abort();
+            setPinError('⏱️ Fingerprint scan timeout. Service may not be responding.');
+            setIsProcessing(false);
+        }, 15000); // 15 second timeout
+        
         xhr.onreadystatechange = function () {
-            if (xhr.readyState === 4 && xhr.status === 200) {
-                const result = JSON.parse(xhr.responseText);
-                if (result.ErrorCode === 0) {
-                    if (result.BMPBase64?.length > 0) setFpImage('data:image/bmp;base64,' + result.BMPBase64);
+            if (xhr.readyState === 4) {
+                clearTimeout(timeout);
+                if (xhr.status === 200) {
+                    try {
+                        const result = JSON.parse(xhr.responseText);
+                        if (result.ErrorCode === 0) {
+                            if (result.BMPBase64?.length > 0) setFpImage('data:image/bmp;base64,' + result.BMPBase64);
+                            setIsProcessing(false);
+                            submitVote({ fingerprintTemplate: result.TemplateBase64 });
+                        } else {
+                            setPinError('Fingerprint error code: ' + result.ErrorCode + '. Try again.');
+                            setIsProcessing(false);
+                        }
+                    } catch (parseErr) {
+                        setPinError('⚠️ Fingerprint scanner returned invalid response. Try again.');
+                        setIsProcessing(false);
+                    }
+                } else if (xhr.status === 0) {
+                    setPinError('❌ Cannot reach SGIBioSrv on port 8443. Service not running or CORS issue.');
                     setIsProcessing(false);
-                    submitVote({ fingerprintTemplate: result.TemplateBase64 });
                 } else {
-                    setPinError('Fingerprint error code: ' + result.ErrorCode + '. Try again.');
+                    setPinError(`❌ Scanner service error (${xhr.status}). Try again.`);
                     setIsProcessing(false);
                 }
             }
         };
         xhr.onerror = () => {
-            setPinError('⚠️ Fingerprint scanner not reachable. Check SGIBioSrv.');
+            clearTimeout(timeout);
+            setPinError('❌ Connection failed: ERR_CONNECTION_CLOSED. Check if sgibiosrv.exe is running on port 8443.');
             setIsProcessing(false);
         };
-        xhr.open('POST', 'https://localhost:8443/SGIFPCapture', true);
-        xhr.send();
+        xhr.onabort = () => {
+            clearTimeout(timeout);
+            setIsProcessing(false);
+        };
+        try {
+            xhr.open('POST', 'https://localhost:8443/SGIFPCapture', true);
+            xhr.send();
+        } catch (err) {
+            clearTimeout(timeout);
+            setPinError('⚠️ Failed to initiate scan: ' + err.message);
+            setIsProcessing(false);
+        }
     }
 
     // ── PIN submit ──────────────────────────────────────────────

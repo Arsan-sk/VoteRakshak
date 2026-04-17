@@ -45,23 +45,48 @@ function Register() {
         setFpStatus('Scanning fingerprint...');
         const uri = 'https://localhost:8443/SGIFPCapture';
         const xhr = new XMLHttpRequest();
+        const timeout = setTimeout(() => {
+            xhr.abort();
+            setFpStatus('⏱️ Scan timeout. Service may not be responding.');
+        }, 15000);
+        
         xhr.onreadystatechange = function () {
-            if (xhr.readyState === 4 && xhr.status === 200) {
-                const result = JSON.parse(xhr.responseText);
-                if (result.ErrorCode === 0) {
-                    if (result.BMPBase64?.length > 0) setFpImage('data:image/bmp;base64,' + result.BMPBase64);
-                    setFingerprint(result.TemplateBase64);
-                    setFpStatus('✅ Fingerprint captured');
+            if (xhr.readyState === 4) {
+                clearTimeout(timeout);
+                if (xhr.status === 200) {
+                    try {
+                        const result = JSON.parse(xhr.responseText);
+                        if (result.ErrorCode === 0) {
+                            if (result.BMPBase64?.length > 0) setFpImage('data:image/bmp;base64,' + result.BMPBase64);
+                            setFingerprint(result.TemplateBase64);
+                            setFpStatus('✅ Fingerprint captured');
+                        } else {
+                            setFpStatus('❌ Scanner Error ' + result.ErrorCode + ' — try again');
+                        }
+                    } catch (e) {
+                        setFpStatus('❌ Invalid response from scanner — try again');
+                    }
+                } else if (xhr.status === 0) {
+                    setFpStatus('❌ Cannot reach SGIBioSrv on port 8443. Connection closed or service not running.');
                 } else {
-                    setFpStatus('❌ Error: ' + result.ErrorCode);
+                    setFpStatus('❌ Scanner service error (' + xhr.status + ') — try again');
                 }
-            } else if (xhr.status === 404) {
-                setFpStatus('❌ SGIBioSrv returned 404');
             }
         };
-        xhr.onerror = () => setFpStatus('❌ Cannot reach SGIBioSrv (port 8000). Running in dev mode — fingerprint optional.');
-        xhr.open('POST', uri, true);
-        xhr.send();
+        xhr.onerror = () => {
+            clearTimeout(timeout);
+            setFpStatus('❌ ERR_CONNECTION_CLOSED (error 54) — SGI service may have crashed. Restart it.');
+        };
+        xhr.onabort = () => {
+            clearTimeout(timeout);
+        };
+        try {
+            xhr.open('POST', uri, true);
+            xhr.send();
+        } catch (err) {
+            clearTimeout(timeout);
+            setFpStatus('❌ Cannot start scan: ' + err.message);
+        }
     }
 
     // ── Image file to base64 ──────────────────────────────────
