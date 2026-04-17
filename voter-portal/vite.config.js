@@ -5,5 +5,11 @@ export default defineConfig({
     plugins: [react()],
     server: {
         port: 5173,
+        host: '0.0.0.0',
+        middlewareMode: false,
+    },
+    preview: {
+        port: 5173,
+        host: '0.0.0.0',
     },
 })

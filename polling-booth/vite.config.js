@@ -24,6 +24,12 @@ export default defineConfig(({ mode }) => {
         server: {
             port,
             strictPort: true,
+            host: '0.0.0.0', // Listen on all interfaces for network access
+            middlewareMode: false,
+        },
+        preview: {
+            port,
+            host: '0.0.0.0',
         },
         define: {
             __BOOTH_ID__: JSON.stringify(boothId),

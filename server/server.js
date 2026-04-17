@@ -39,6 +39,7 @@ const httpServer = createServer(app);
 const corsOptions = {
     origin: (origin, callback) => {
         if (!origin) return callback(null, true);
+        
         const allowedOrigins = [
             'http://localhost:5173', // voter-portal / landing-page
             'http://localhost:5174', // officer-dashboard
@@ -51,8 +52,15 @@ const corsOptions = {
             'http://localhost:5181', // CE booth
             'http://localhost:5182', // EE booth
         ];
+        
+        // Allow any network IP (192.168.x.x, 10.x.x.x, 172.x.x.x)
+        const isNetworkIP = /^http:\/\/(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)[0-9.]+:[0-9]+$/.test(origin);
+        const isLocalIP = /^http:\/\/(127\.0\.0\.1|localhost):[0-9]+$/.test(origin);
+        
         if (
             allowedOrigins.includes(origin) ||
+            isNetworkIP ||
+            isLocalIP ||
             origin.endsWith('.vercel.app') ||
             origin.endsWith('.railway.app')
         ) {
@@ -183,13 +191,22 @@ app.use((req, res) => {
 
 // ─── START ────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
-httpServer.listen(PORT, async () => {
+const HOST = process.env.HOST || '0.0.0.0'; // Listen on all interfaces, not just localhost
+httpServer.listen(PORT, HOST, async () => {
     console.log('═══════════════════════════════════════════════════');
     console.log('🚀 VoteRakshak Backend — PHASE 2');
     console.log('═══════════════════════════════════════════════════');
-    console.log(`📡 HTTP:      http://localhost:${PORT}`);
+    console.log(`📡 HTTP:      http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
+    console.log(`🌐 Network:   http://[YOUR_MACHINE_IP]:${PORT}  (use your computer's actual IP)`);
     console.log(`🔌 WebSocket: ws://localhost:${PORT}`);
     console.log(`🌍 Env:       ${process.env.NODE_ENV || 'development'}`);
+    console.log('═══════════════════════════════════════════════════');
+    console.log(`⚙️  Server listening on ${HOST}:${PORT}`);
+    console.log('');
+    console.log('To connect from network:');
+    console.log('1. Find your server IP:  ipconfig (look for IPv4 Address)');
+    console.log('2. Set VITE_BACKEND_URL=http://YOUR_IP:5000 on client');
+    console.log('');
     console.log('═══════════════════════════════════════════════════');
 
     // Pre-warm system flags from DB
