@@ -43,7 +43,7 @@ function Register() {
     // ── Fingerprint capture (SecuGen) ─────────────────────────
     function captureFingerprint() {
         setFpStatus('Scanning fingerprint...');
-        const uri = 'https://localhost:8000/SGIFPCapture';
+        const uri = 'https://localhost:8443/SGIFPCapture';
         const xhr = new XMLHttpRequest();
         xhr.onreadystatechange = function () {
             if (xhr.readyState === 4 && xhr.status === 200) {

@@ -74,7 +74,7 @@ function VotingScreen({ authorizedVoter, activeElection, candidates, onVoteSucce
             setPinError('⚠️ Fingerprint scanner not reachable. Check SGIBioSrv.');
             setIsProcessing(false);
         };
-        xhr.open('POST', 'https://localhost:8000/SGIFPCapture', true);
+        xhr.open('POST', 'https://localhost:8443/SGIFPCapture', true);
         xhr.send();
     }
 
