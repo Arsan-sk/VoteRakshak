@@ -1,13 +1,23 @@
 /**
  * API utility for Officer / BLO Dashboard — Phase 2
  * Updated: BLO login, roll-number voter search, dept-aware unlock
+ * Network Support: Uses VITE_BACKEND_URL from .env for network deployments
  */
 
 import axios from 'axios';
 
 let baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
-if (!baseUrl.startsWith('http')) baseUrl = `http://${baseUrl}`;
+if (!baseUrl || baseUrl.trim() === '') {
+    baseUrl = 'http://localhost:5000';
+}
+// Ensure protocol
+if (!baseUrl.startsWith('http')) {
+    baseUrl = `http://${baseUrl}`;
+}
+// Remove trailing slash
 baseUrl = baseUrl.replace(/\/$/, '');
+
+console.log(`🔌 Officer Dashboard API connecting to: ${baseUrl}`);
 
 const api = axios.create({
     baseURL: `${baseUrl}/api`,

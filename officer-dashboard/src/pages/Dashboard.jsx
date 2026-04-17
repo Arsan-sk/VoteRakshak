@@ -11,7 +11,14 @@ import { useNavigate } from 'react-router-dom';
 import { searchVoterByRollNumber, verifyVoterIdentity, unlockBooth, getActiveBooths, getFlags, getActiveElection, setOfficerFlag } from '../utils/api';
 import { io } from 'socket.io-client';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+let BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+if (!BACKEND_URL || BACKEND_URL.trim() === '') {
+    BACKEND_URL = 'http://localhost:5000';
+}
+if (!BACKEND_URL.startsWith('http')) {
+    BACKEND_URL = `http://${BACKEND_URL}`;
+}
+BACKEND_URL = BACKEND_URL.replace(/\/$/, '');
 
 const DEPT_NAMES = {
     CO: 'Computer Engineering', AI: 'AI / ML', DS: 'Data Science',

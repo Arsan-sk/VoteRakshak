@@ -1,11 +1,20 @@
 /**
  * API utility for Polling Booth — Phase 2
- * castVote now uses electionId, candidateId, voterHash
+ * Network Support: Uses VITE_BACKEND_URL from .env for network deployments
  */
 
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+let API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+if (!API_BASE_URL || API_BASE_URL.trim() === '') {
+    API_BASE_URL = 'http://localhost:5000';
+}
+if (!API_BASE_URL.startsWith('http')) {
+    API_BASE_URL = `http://${API_BASE_URL}`;
+}
+API_BASE_URL = API_BASE_URL.replace(/\/$/, '');
+
+console.log(`🔌 Polling Booth API connecting to: ${API_BASE_URL}`);
 
 const api = axios.create({
     baseURL: `${API_BASE_URL}/api`,

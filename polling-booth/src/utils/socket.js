@@ -78,6 +78,15 @@ export function initializeSocket(onAllowVote, onReset) {
     // Connection error
     socket.on('connect_error', (error) => {
         console.error('❌ Connection error:', error.message);
+        console.error('   Backend URL:', backendUrl);
+        console.error('   Make sure:');
+        console.error('   1. Backend server is running on:', backendUrl);
+        console.error('   2. VITE_BACKEND_URL in .env is correct');
+        console.error('   3. Network connectivity is working');
+        console.error('   4. Firewall allows port 5000');
+        if (error.data?.content) {
+            console.error('   Server response:', error.data.content);
+        }
     });
 
     // Disconnection
